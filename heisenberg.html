@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Contact Structure Visualization</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            /* Mobile optimization: prevent pull-to-refresh and browser-level panning */
+            touch-action: none; 
+        }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "lil-gui": "https://unpkg.com/lil-gui@0.19.1/dist/lil-gui.esm.min.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import GUI from 'lil-gui';
+
+        // 1. Setup Scene, Camera, and Renderer
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x111111, 0.02);
+
+        // FIXED: Reduced near plane to 0.01 to prevent clipping when close to the curve
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
+        camera.up.set(0, 0, 1);
+        
+        const defaultCameraPos = new THREE.Vector3(15, 12, 12);
+        const defaultTarget = new THREE.Vector3(0, 0, 4.0);
+        
+        camera.position.copy(defaultCameraPos);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // 1.5 Setup Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        dirLight.position.set(10, 10, 20);
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0x0088ff, 100, 50);
+        pointLight.position.set(-10, -5, 5);
+        scene.add(pointLight);
+
+        // 2. Add Orbit Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.copy(defaultTarget); 
+
+        // 3. Add Axes Helper
+        const axesHelper = new THREE.AxesHelper(10);
+        // Set X, Y, and Z axes colors to white
+        axesHelper.setColors(0x808080, 0x808080, 0x808080); 
+        scene.add(axesHelper);
+
+        // 3.5. Add Starfield (Distant)
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 6000;
+        const starPositions = new Float32Array(starCount * 3);
+        
+        const minDistance = 60;  
+        const maxDistance = 300; 
+
+        for(let i = 0; i < starCount; i++) {
+            let x = (Math.random() - 0.5) * 2;
+            let y = (Math.random() - 0.5) * 2;
+            let z = (Math.random() - 0.5) * 2;
+
+            let mag = Math.sqrt(x*x + y*y + z*z);
+            if (mag === 0) { x = 1; mag = 1; }
+            
+            const distance = minDistance + Math.random() * (maxDistance - minDistance);
+            
+            starPositions[i * 3]     = (x / mag) * distance;
+            starPositions[i * 3 + 1] = (y / mag) * distance;
+            starPositions[i * 3 + 2] = (z / mag) * distance;
+        }
+
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+
+        const starMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 0.15,
+            sizeAttenuation: true, 
+            fog: false 
+        });
+
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+
+        // 4. GUI Settings State
+        const settings = {
+            showPlanes: false,
+            showZZeroOnly: false,
+            pointSpacing: 1.0, 
+            showCurve: false,
+            flyAlongCurve: function() { startFlight(); } 
+        };
+
+        // 5. Build the Planes
+        const planesGroup = new THREE.Group();
+        scene.add(planesGroup);
+        
+        const planeGeometry = new THREE.CircleGeometry(0.25, 32); 
+        const planeMaterial = new THREE.MeshNormalMaterial({
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.85
+        });
+
+        const planesData = [];
+
+        for (let i = -5; i <= 5; i++) {
+            for (let j = -5; j <= 5; j++) {
+                for (let k = 0; k <= 8; k++) { 
+                    const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+                    planesGroup.add(plane);
+                    planesData.push({ mesh: plane, i: i, j: j, k: k });
+                }
+            }
+        }
+
+        function updatePlanes() {
+            planesGroup.visible = settings.showPlanes;
+            const spacing = settings.pointSpacing;
+
+            planesData.forEach(item => {
+                const x = item.i * spacing;
+                const y = item.j * spacing;
+                const z = item.k * spacing;
+
+                item.mesh.position.set(x, y, z);
+
+                const nx = -0.5 * y;
+                const ny = 0.5 * x;
+                const nz = 1;
+
+                const target = new THREE.Vector3(x + nx, y + ny, z + nz);
+                item.mesh.lookAt(target);
+
+                if (settings.showZZeroOnly) {
+                    item.mesh.visible = (item.k === 0);
+                } else {
+                    item.mesh.visible = true;
+                }
+            });
+        }
+        
+        updatePlanes();
+
+        // 6. Build the Parametric Legendrian Curve
+        class LegendrianCurve extends THREE.Curve {
+            constructor() {
+                super();
+            }
+            getPoint(t, optionalTarget = new THREE.Vector3()) {
+                const tScaled = t * Math.PI * 2;
+                
+                const x = 1.5 + 1.5 * Math.cos(tScaled + Math.PI);
+                const y = 1.5 * Math.sin(tScaled);
+                const z = (9/8) * tScaled - (9/8) * Math.sin(tScaled);
+
+                return optionalTarget.set(x, y, z);
+            }
+        }
+
+        const path = new LegendrianCurve();
+        const tubeGeometry = new THREE.TubeGeometry(path, 512, 0.04, 32, false);
+        
+        const tubeMaterial = new THREE.MeshPhysicalMaterial({ 
+            color: 0x000000,
+            emissive: 0xC0C0C0,
+            roughness: 0.8,
+            metalness: 0.7,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.1,
+            reflectivity: 1.0
+        }); 
+        
+        const curveMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
+        
+        curveMesh.visible = settings.showCurve;
+        scene.add(curveMesh);
+
+        // 7. Setup GUI Menu
+        const gui = new GUI({ title: 'Contact Structure' });
+        
+        const planesController = gui.add(settings, 'showPlanes')
+           .name('Show Planes')
+           .onChange(updatePlanes);
+
+        gui.add(settings, 'showZZeroOnly').name('Show Only z=0 Planes').onChange(updatePlanes);
+        gui.add(settings, 'pointSpacing', 0.2, 3.0, 0.1).name('Point Spacing').onChange(updatePlanes);
+        
+        const curveController = gui.add(settings, 'showCurve')
+           .name('Show Legendrian Curve')
+           .onChange(value => { curveMesh.visible = value; });
+
+        gui.add(settings, 'flyAlongCurve').name('✈️ Fly Along Curve');
+
+        // Flight Animation Variables
+        let flightState = 0; 
+        let animStartTime = 0;
+        
+        const transitionDuration = 1000; 
+        const flightDuration = 10000;    
+        
+        // FIXED: Increased offset so camera doesn't intersect the tube
+        const FLIGHT_OFFSET = 0.2; 
+
+        const startTransPos = new THREE.Vector3();
+        const startTransTarget = new THREE.Vector3();
+        const endTransPos = new THREE.Vector3();
+        const endTransTarget = new THREE.Vector3();
+
+        function startFlight() {
+            if (flightState !== 0) return; 
+            
+            flightState = 1; 
+            animStartTime = performance.now();
+            controls.enabled = false;
+            
+            settings.showCurve = true;
+            curveMesh.visible = true;
+            curveController.updateDisplay();
+
+            settings.showPlanes = true;
+            updatePlanes();
+            planesController.updateDisplay();
+
+            startTransPos.copy(camera.position);
+            startTransTarget.copy(controls.target);
+
+            const startPoint = path.getPoint(0);
+            const startTangent = path.getTangent(0);
+
+            endTransPos.copy(startPoint);
+            endTransPos.z += FLIGHT_OFFSET; 
+
+            endTransTarget.copy(startPoint).add(startTangent);
+            endTransTarget.z += FLIGHT_OFFSET; 
+        }
+
+        // 8. Animation Loop
+        function animate(time) {
+            requestAnimationFrame(animate);
+            time = time || performance.now();
+
+            if (flightState === 1) {
+                let t = (time - animStartTime) / transitionDuration;
+                
+                if (t >= 1.0) {
+                    t = 1.0;
+                    flightState = 2; 
+                    animStartTime = time; 
+                } else {
+                    t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+                }
+
+                camera.position.lerpVectors(startTransPos, endTransPos, t);
+                
+                const currentTarget = new THREE.Vector3();
+                currentTarget.lerpVectors(startTransTarget, endTransTarget, t);
+                camera.lookAt(currentTarget);
+
+            } else if (flightState === 2) {
+                const t = (time - animStartTime) / flightDuration;
+
+                if (t >= 1.0) {
+                    flightState = 3;
+                    animStartTime = time;
+
+                    startTransPos.copy(camera.position);
+                    
+                    const lastPoint = path.getPoint(1.0);
+                    const lastTangent = path.getTangent(1.0);
+                    startTransTarget.copy(lastPoint).add(lastTangent);
+                    startTransTarget.z += FLIGHT_OFFSET;
+
+                    endTransPos.copy(defaultCameraPos);
+                    endTransTarget.copy(defaultTarget);
+
+                } else {
+                    const point = path.getPoint(t);
+                    const tangent = path.getTangent(t);
+
+                    camera.position.copy(point);
+                    camera.position.z += FLIGHT_OFFSET; 
+                    
+                    const lookAtTarget = point.clone().add(tangent);
+                    lookAtTarget.z += FLIGHT_OFFSET; 
+                    camera.lookAt(lookAtTarget);
+                }
+            } else if (flightState === 3) {
+                let t = (time - animStartTime) / transitionDuration;
+
+                if (t >= 1.0) {
+                    flightState = 0;
+                    controls.enabled = true;
+                    
+                    camera.position.copy(defaultCameraPos);
+                    camera.up.set(0, 0, 1);
+                    controls.target.copy(defaultTarget);
+                    camera.lookAt(controls.target);
+                    controls.update();
+                } else {
+                    t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+                    camera.position.lerpVectors(startTransPos, endTransPos, t);
+                    
+                    const currentTarget = new THREE.Vector3();
+                    currentTarget.lerpVectors(startTransTarget, endTransTarget, t);
+                    camera.lookAt(currentTarget);
+                }
+            } else {
+                controls.update();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // 9. Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start animation
+        animate();
+    </script>
+</body>
+</html>

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kinematic Sphere Simulation (Distant Atmosphere)</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #e0e0e0; 
+            color: #333333; 
+            font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; 
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #canvas-container { width: 100vw; height: 100vh; position: relative; display: block; }
+        
+        #heatmap-legend {
+            position: absolute;
+            bottom: 25px;
+            left: 25px;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            padding: 12px 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 0.3s ease;
+        }
+        #heatmap-legend h3 { margin: 0 0 8px 0; font-size: 0.85em; font-weight: 600; color: #222; text-transform: uppercase; letter-spacing: 1px; }
+        .color-legend { height: 6px; background: linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000); border-radius: 4px; width: 180px; }
+        .legend-labels { display: flex; justify-content: space-between; font-size: 0.70em; color: #555; margin-top: 6px; font-weight: 600; }
+
+        @media (max-width: 600px) {
+            .lil-gui { --width: 250px; }
+            #heatmap-legend { bottom: 15px; left: 15px; width: calc(100% - 60px); max-width: 200px; }
+            .color-legend { width: 100%; }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.19"></script>
+</head>
+<body>
+
+<div id="canvas-container">
+    <div id="heatmap-legend">
+        <h3>Path Velocity</h3>
+        <div class="color-legend"></div>
+        <div class="legend-labels"><span>MIN</span><span>AVG</span><span>MAX</span></div>
+    </div>
+</div>
+
+<script>
+    const container = document.getElementById('canvas-container');
+    const heatmapLegend = document.getElementById('heatmap-legend');
+    const scene = new THREE.Scene();
+    
+    // --- LIGHT THEME BACKGROUND ---
+    const bgCol = 0xe0e0e0;
+    scene.background = new THREE.Color(bgCol); 
+    // MODIFIED: Pushed fog back (30 to 100) so distant dust is visible but still fades at the horizon
+    scene.fog = new THREE.Fog(bgCol, 30, 100); 
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 150);
+    // Camera is approx distance 14.5 from center (sqrt(9^2 + 9^2 + 7^2))
+    camera.position.set(9, 9, 7);
+    camera.up.set(0, 0, 1);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+    container.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.autoRotate = false;
+
+    // --- LIGHTING ---
+    const ambientLight = new THREE.HemisphereLight(0xffffff, 0x555555, 0.6); 
+    scene.add(ambientLight);
+
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.0); 
+    dirLight1.position.set(10, 10, 15);
+    dirLight1.castShadow = true;
+    dirLight1.shadow.mapSize.width = 4096; 
+    dirLight1.shadow.mapSize.height = 4096;
+    dirLight1.shadow.bias = 0; 
+    dirLight1.shadow.normalBias = 0.02; 
+    const d = 8;
+    dirLight1.shadow.camera.left = -d; dirLight1.shadow.camera.right = d;
+    dirLight1.shadow.camera.top = d; dirLight1.shadow.camera.bottom = -d;
+    scene.add(dirLight1);
+
+    const spotLight = new THREE.SpotLight(0xffffff, 1.5);
+    spotLight.position.set(-10, -10, 5);
+    spotLight.lookAt(0,0,0);
+    scene.add(spotLight);
+
+    // --- PROCEDURAL DUST CLOUD (MODIFIED) ---
+    function createDustTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 32; canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        grad.addColorStop(0, 'rgba(80, 80, 80, 1.0)'); 
+        grad.addColorStop(1, 'rgba(80, 80, 80, 0.0)'); 
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 32, 32);
+        const texture = new THREE.CanvasTexture(canvas);
+        return texture;
+    }
+
+    // MODIFIED: Generate particles in a "Hollow Shell"
+    // Inner Radius: 25 (Beyond camera at ~15)
+    // Outer Radius: 70
+    const particleCount = 500;
+    const particlesGeometry = new THREE.BufferGeometry();
+    const particlePositions = [];
+
+    for (let i = 0; i < particleCount; i++) {
+        // Random spherical coordinates
+        const r = 25 + Math.random() * 45; // Radius between 25 and 70
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1); // Uniform sphere distribution
+        
+        const x = r * Math.sin(phi) * Math.cos(theta);
+        const y = r * Math.sin(phi) * Math.sin(theta);
+        const z = r * Math.cos(phi);
+
+        particlePositions.push(x, y, z);
+    }
+
+    particlesGeometry.setAttribute('position', new THREE.Float32BufferAttribute(particlePositions, 3));
+
+    const particlesMaterial = new THREE.PointsMaterial({
+        color: 0x666666,      
+        size: 0.4,             // Slightly larger since they are further away
+        map: createDustTexture(),
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,    
+        blending: THREE.NormalBlending
+    });
+
+    const dustSystem = new THREE.Points(particlesGeometry, particlesMaterial);
+    scene.add(dustSystem);
+
+
+    // --- MAIN GEOMETRY ---
+    const R = 3, r = 1;
+    const bigSphereGeo = new THREE.SphereGeometry(R, 128, 128);
+    const bigSphereMat = new THREE.MeshStandardMaterial({ 
+        color: 0x050505, roughness: 0.7, metalness: 0.1 
+    }); 
+    const bigSphere = new THREE.Mesh(bigSphereGeo, bigSphereMat);
+    bigSphere.receiveShadow = true; bigSphere.castShadow = true; 
+    scene.add(bigSphere);
+
+    const smallSphereGroup = new THREE.Group();
+    const textureLoader = new THREE.TextureLoader();
+    const earthTexture = textureLoader.load('https://upload.wikimedia.org/wikipedia/commons/c/c3/Solarsystemscope_texture_2k_earth_daymap.jpg');
+    const smallSphereMat = new THREE.MeshStandardMaterial({ map: earthTexture, roughness: 0.5, metalness: 0.1 });
+    const smallSphereMesh = new THREE.Mesh(new THREE.SphereGeometry(r, 64, 64), smallSphereMat);
+    smallSphereMesh.castShadow = true; smallSphereMesh.receiveShadow = true;
+    smallSphereMesh.rotation.x = Math.PI / 2; 
+    smallSphereGroup.add(smallSphereMesh);
+    scene.add(smallSphereGroup);
+
+    // --- PATH TRACING ---
+    const maxPathPoints = 10000;
+    const pathGeo = new THREE.BufferGeometry();
+    const pathPositions = new Float32Array(maxPathPoints * 3);
+    const pathColors = new Float32Array(maxPathPoints * 3); 
+    pathGeo.setAttribute('position', new THREE.BufferAttribute(pathPositions, 3));
+    pathGeo.setAttribute('color', new THREE.BufferAttribute(pathColors, 3));
+    pathGeo.setDrawRange(0, 0);
+    const pathLine = new THREE.Line(pathGeo, new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2 }));
+    scene.add(pathLine);
+
+    const guideLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineDashedMaterial({ color: 0x008800, dashSize: 0.1, gapSize: 0.1, transparent: true, opacity: 0.8 }));
+    scene.add(guideLine);
+
+    // --- PHYSICS & KINEMATICS ---
+    const LIPSCHITZ_CONSTANT = 0.15;
+    let state = { u: 0, v: 0, w: 0, lastU: 0, lastV: 0, lastW: 0, mode: 'Roll' };
+    let pathTrace = [], animationFrames = [], isPlaying = false, currentFrame = 0;
+
+    function getNormal(u, v) { return new THREE.Vector3(Math.sin(u) * Math.cos(v), Math.sin(u) * Math.sin(v), Math.cos(u)); }
+
+    function addPathPoint(newPos) {
+        let speed = pathTrace.length > 0 ? newPos.distanceTo(pathTrace[pathTrace.length - 1].pos) : 0;
+        let color = new THREE.Color().setHSL((1.0 - Math.min(speed / LIPSCHITZ_CONSTANT, 1.0)) * 0.66, 1.0, 0.4); 
+        pathTrace.push({ pos: newPos.clone(), color: color });
+    }
+
+    function updatePhysics(u, v, w, mode, isManual = true) {
+        const n1 = getNormal(state.lastU, state.lastV), n2 = getNormal(u, v);
+        const pos = n2.clone().multiplyScalar(R + r);
+        if (u !== state.lastU || v !== state.lastV) {
+            const axis = new THREE.Vector3().crossVectors(n1, n2);
+            const angle = n1.angleTo(n2);
+            if (axis.lengthSq() > 1e-10) {
+                const normAxis = axis.normalize();
+                if (mode === 'Roll') smallSphereGroup.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(normAxis, angle * (1 + R/r)));
+                else if (mode === 'Slide') smallSphereGroup.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(normAxis, angle));
+            }
+            state.lastU = u; state.lastV = v;
+        }
+        if (mode === 'Slide' && w !== state.lastW) {
+            smallSphereGroup.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(n2, w - state.lastW));
+            state.lastW = w;
+        } else if (mode === 'Roll') state.lastW = w;
+        smallSphereGroup.position.copy(pos);
+        if (isManual) { addPathPoint(n2.clone().multiplyScalar(R + 0.05)); updatePathGraphic(); }
+        guideLine.geometry.setFromPoints([new THREE.Vector3(), pos]); guideLine.computeLineDistances();
+    }
+
+    function updatePathGraphic() {
+        let count = Math.min(pathTrace.length, maxPathPoints);
+        for (let i = 0; i < count; i++) {
+            pathPositions.set([pathTrace[i].pos.x, pathTrace[i].pos.y, pathTrace[i].pos.z], i * 3);
+            pathColors.set([pathTrace[i].color.r, pathTrace[i].color.g, pathTrace[i].color.b], i * 3);
+        }
+        pathGeo.attributes.position.needsUpdate = pathGeo.attributes.color.needsUpdate = true;
+        pathGeo.setDrawRange(0, count);
+    }
+
+    function generateSmoothCurve() {
+        resetSimulation(); const steps = 600; let pts = [getNormal(0,0).multiplyScalar(R+r)], tu=0, tv=0;
+        for(let i=0; i<6; i++) { tu += (Math.random()*4-2); tv += (Math.random()*6-3); pts.push(getNormal(tu, tv).multiplyScalar(R+r)); }
+        const curvePoints = new THREE.CatmullRomCurve3(pts).getPoints(steps - 1);
+        curvePoints.forEach(p => {
+            p.normalize(); let cu = Math.acos(p.z), cv = (Math.atan2(p.y, p.x) + Math.PI*2) % (Math.PI*2);
+            updatePhysics(cu, cv, 0, 'Roll', false); addPathPoint(p.clone().multiplyScalar(R + 0.05));
+            animationFrames.push({ p: smallSphereGroup.position.clone(), q: smallSphereGroup.quaternion.clone(), t: pathTrace.length, u: cu, v: cv });
+        });
+        updatePathGraphic(); startPlayback();
+    }
+
+    function generateLipschitz() {
+        resetSimulation(); let cu=0, cv=0;
+        for (let i = 0; i < 600; i++) {
+            const ang = Math.random()*Math.PI*2, sz = Math.random()*LIPSCHITZ_CONSTANT;
+            cu += sz * Math.cos(ang); cu = Math.max(0.01, Math.min(Math.PI-0.01, cu));
+            cv = (cv + (sz * Math.sin(ang)) / Math.sin(cu) + Math.PI*2) % (Math.PI*2);
+            updatePhysics(cu, cv, 0, 'Roll', false); addPathPoint(getNormal(cu, cv).multiplyScalar(R + 0.05));
+            animationFrames.push({ p: smallSphereGroup.position.clone(), q: smallSphereGroup.quaternion.clone(), t: pathTrace.length, u: cu, v: cv });
+        }
+        updatePathGraphic(); startPlayback();
+    }
+
+    // --- GUI SETUP ---
+    const guiParams = {
+        smoothCurve: generateSmoothCurve,
+        lipschitzCurve: generateLipschitz,
+        reset: resetSimulation,
+        playPause: () => { isPlaying = !isPlaying; playBtn.name(isPlaying ? '⏸ Pause' : '▶ Play'); },
+        progress: 0,
+        mode: 'Roll',
+        u: 0, v: 0, w: 0,
+        showSmallSphere: true,
+        showHeatmap: true,
+        showDust: true
+    };
+
+    const gui = new lil.GUI({ title: 'Earth Controls' });
+    gui.add(guiParams, 'smoothCurve').name('Smooth Curve');
+    gui.add(guiParams, 'lipschitzCurve').name('Lipschitz Curve');
+    gui.add(guiParams, 'reset').name('Reset');
+
+    const playbackFolder = gui.addFolder('Playback').hide();
+    const playBtn = playbackFolder.add(guiParams, 'playPause').name('▶ Play');
+    const progressCtrl = playbackFolder.add(guiParams, 'progress', 0, 599, 1).name('Frame').listen().onChange(val => {
+        isPlaying = false; playBtn.name('▶ Play'); renderFrame(val);
+    });
+
+    const settingsFolder = gui.addFolder('Settings');
+    settingsFolder.add(guiParams, 'mode', ['Roll', 'Slide']).name('Mode').onChange(val => {
+        state.mode = val; val === 'Slide' ? wCtrl.enable() : wCtrl.disable();
+        guideLine.visible = (val === 'Slide' && guiParams.showSmallSphere);
+    });
+    settingsFolder.add(guiParams, 'showSmallSphere').name('Show Earth').onChange(val => {
+        smallSphereGroup.visible = val; guideLine.visible = (state.mode === 'Slide' && val);
+    });
+    settingsFolder.add(guiParams, 'showHeatmap').name('Show Heatmap').onChange(val => {
+        heatmapLegend.style.display = val ? 'block' : 'none';
+    });
+    settingsFolder.add(guiParams, 'showDust').name('Atmosphere').onChange(val => {
+        dustSystem.visible = val;
+    });
+
+    const manualFolder = gui.addFolder('Manual Controls');
+    function handleManualUpdate() {
+        state.u = guiParams.u; state.v = guiParams.v; state.w = guiParams.w;
+        updatePhysics(state.u, state.v, state.w, state.mode, true);
+    }
+    const uCtrl = manualFolder.add(guiParams, 'u', 0, Math.PI, 0.01).name('Longitude (u)').listen().onChange(handleManualUpdate);
+    const vCtrl = manualFolder.add(guiParams, 'v', 0, Math.PI * 2, 0.01).name('Latitude (v)').listen().onChange(handleManualUpdate);
+    const wCtrl = manualFolder.add(guiParams, 'w', 0, Math.PI * 2, 0.01).name('Spin (w)').listen().onChange(handleManualUpdate);
+    wCtrl.disable();
+
+    if (window.innerWidth <= 600) gui.close();
+
+    function startPlayback() { 
+        currentFrame = 0; isPlaying = true; playBtn.name('⏸ Pause');
+        progressCtrl.max(animationFrames.length - 1); playbackFolder.show();
+        uCtrl.disable(); vCtrl.disable(); wCtrl.disable();
+    }
+
+    function resetSimulation() {
+        state = { u: 0, v: 0, w: 0, lastU: 0, lastV: 0, lastW: 0, mode: guiParams.mode };
+        guiParams.u = 0; guiParams.v = 0; guiParams.w = 0; 
+        smallSphereGroup.quaternion.identity(); pathTrace = []; animationFrames = []; isPlaying = false;
+        updatePathGraphic(); updatePhysics(0, 0, 0, state.mode, false);
+        playbackFolder.hide(); uCtrl.enable(); vCtrl.enable(); 
+        guiParams.mode === 'Slide' ? wCtrl.enable() : wCtrl.disable();
+    }
+
+    function renderFrame(idx) {
+        const f = animationFrames[idx]; if (!f) return;
+        smallSphereGroup.position.copy(f.p); smallSphereGroup.quaternion.copy(f.q);
+        pathGeo.setDrawRange(0, f.t); guiParams.progress = idx;
+    }
+
+    function animate() {
+        requestAnimationFrame(animate); 
+        controls.update(); 
+        
+        if(dustSystem) {
+            dustSystem.rotation.y += 0.00005; 
+            dustSystem.rotation.x += 0.00002;
+        }
+
+        if (isPlaying && currentFrame < animationFrames.length) renderFrame(currentFrame++); 
+        else if (currentFrame >= animationFrames.length && isPlaying) { isPlaying = false; playBtn.name('▶ Play'); }
+        renderer.render(scene, camera);
+    }
+    
+    window.onresize = () => { 
+        camera.aspect = window.innerWidth / window.innerHeight; 
+        camera.updateProjectionMatrix(); 
+        renderer.setSize(window.innerWidth, window.innerHeight); 
+    };
+    
+    resetSimulation();
+    animate();
+</script>
+</body>
+</html>
