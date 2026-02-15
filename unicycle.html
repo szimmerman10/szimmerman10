@@ -74,22 +74,16 @@
 
     <div id="loading">Loading Models...</div>
 
-    <div id="info">
-        <strong>Controls:</strong><br>
-        Move: <span class="key">W</span> <span class="key">S</span><br>
-        Rotate: <span class="key">Q</span> <span class="key">E</span><br>
-        Strafe: <span class="key">A</span> <span class="key">D</span><br>
-    </div>
 
     <div id="controls-area">
         <button id="btn-path">Create Path</button>
         <div class="control-grid">
-            <button id="btn-fwd">↑</button>
-            <button id="btn-s-left">←</button>
-            <button id="btn-left">↶</button>
-            <button id="btn-back">↓</button>
-            <button id="btn-right">↷</button>
-            <button id="btn-s-right">→</button>
+            <button id="btn-fwd">↑W</button>
+            <button id="btn-s-left">←A</button>
+            <button id="btn-left">↶Q</button>
+            <button id="btn-back">↓S</button>
+            <button id="btn-right">E↷</button>
+            <button id="btn-s-right">D→</button>
         </div>
     </div>
 
@@ -106,7 +100,7 @@
         const ROT_SPEED = 0.05;
         const DOOR_WIDTH = 5;
         const CHAR_RADIUS = 0.5; 
-        const TARGET_Z = WALL_Z_POS + 1.5; 
+        const TARGET_Z = WALL_Z_POS; 
 
         // --- Globals ---
         let scene, camera, renderer, controls, clock;
@@ -332,7 +326,7 @@ function createSkySphere() {
             createFenceSegment((DOOR_WIDTH/2), leftWidth - 10);
 
             // 3. Target Ring
-            const ringMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
             const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), ringMat);
             targetRing.rotation.x = -Math.PI/2;
             targetRing.position.set(0, 0.05, TARGET_Z);
@@ -733,7 +727,7 @@ container.add(model);
             const keyMap = { 'KeyW': 'forward', 'KeyS': 'backward', 'KeyQ': 'rotLeft', 'KeyE': 'rotRight', 'KeyA': 'strafeLeft', 'KeyD': 'strafeRight' };
             const handleKey = (code, isDown) => {
                 if (keyMap[code]) {
-                    if (isDown) stopAutoPilot(); 
+                    if (isDown) stopAutoPilot();   
                     moveState[keyMap[code]] = isDown;
                     const btnId = { forward:'btn-fwd', backward:'btn-back', rotLeft:'btn-left', rotRight:'btn-right', strafeLeft:'btn-s-left', strafeRight:'btn-s-right' }[keyMap[code]];
                     if(btnId) document.getElementById(btnId).classList.toggle('active', isDown);
