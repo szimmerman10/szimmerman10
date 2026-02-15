@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js - Vibrant Blue Sky</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; user-select: none; -webkit-user-select: none; }
+        
+        #gui-container { position: absolute; top: 0; right: 0; z-index: 10; }
+
+        #info {
+            position: absolute; top: 10px; left: 10px; color: #222; background: rgba(255,255,255,0.9);
+            padding: 15px; pointer-events: none; border-radius: 4px; z-index: 5;
+            border: 1px solid #aaa; line-height: 1.5; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            font-size: 14px;
+        }
+        
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #ffffff; font-size: 24px; font-weight: bold; background: rgba(0,0,0,0.7);
+            padding: 30px; border-radius: 10px; display: none; z-index: 100;
+            backdrop-filter: blur(5px);
+        }
+
+        .key { display: inline-block; background: #eee; border: 1px solid #ccc; border-radius: 4px; padding: 0 6px; font-family: monospace; font-weight: bold; color: #333; }
+
+        #controls-area {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 10;
+        }
+
+        .control-grid {
+            display: grid; grid-template-columns: 70px 70px 70px; grid-template-rows: 60px 60px;
+            gap: 8px; align-items: center; justify-items: center;
+        }
+
+        button {
+            width: 60px; height: 60px; background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(255, 255, 255, 0.4);
+            color: #333; font-size: 20px; border-radius: 16px; cursor: pointer; touch-action: manipulation;
+            transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1); 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            backdrop-filter: blur(4px);
+        }
+        button:active, button.active { background: rgba(255, 255, 255, 1.0); transform: scale(0.95); box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+
+        #btn-path {
+            width: 200px; height: 50px; font-size: 16px; background: rgba(40, 167, 69, 0.85); border: none;
+            font-weight: bold; color: white; border-radius: 12px; cursor: pointer;
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+        }
+        #btn-path:active { background: #218838; transform: scale(0.98); }
+
+        #btn-fwd    { grid-column: 2; grid-row: 1; }
+        #btn-s-left { grid-column: 1; grid-row: 2; display: none; }
+        #btn-left   { grid-column: 1; grid-row: 1; }
+        #btn-back   { grid-column: 2; grid-row: 2; }
+        #btn-right  { grid-column: 3; grid-row: 1; }
+        #btn-s-right{ grid-column: 3; grid-row: 2; display: none; }
+    </style>
+    
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+          "lil-gui": "https://unpkg.com/lil-gui@0.19.1/dist/lil-gui.esm.min.js"
+        }
+      }
+    </script>
+</head>
+<body>
+
+    <div id="loading">Loading Models...</div>
+
+    <div id="info">
+        <strong>Controls:</strong><br>
+        Move: <span class="key">W</span> <span class="key">S</span><br>
+        Rotate: <span class="key">Q</span> <span class="key">E</span><br>
+        Strafe: <span class="key">A</span> <span class="key">D</span><br>
+    </div>
+
+    <div id="controls-area">
+        <button id="btn-path">Create Path</button>
+        <div class="control-grid">
+            <button id="btn-fwd">↑</button>
+            <button id="btn-s-left">←</button>
+            <button id="btn-left">↶</button>
+            <button id="btn-back">↓</button>
+            <button id="btn-right">↷</button>
+            <button id="btn-s-right">→</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { GUI } from 'lil-gui';
+        
+        // --- Configuration ---
+        const FLOOR_SIZE = 200;
+        const WALL_Z_POS = 10; 
+        const MOVE_SPEED = 0.15; 
+        const ROT_SPEED = 0.05;
+        const DOOR_WIDTH = 5;
+        const CHAR_RADIUS = 0.5; 
+        const TARGET_Z = WALL_Z_POS + 1.5; 
+
+        // --- Globals ---
+        let scene, camera, renderer, controls, clock;
+        let activeCharacter = null;
+        let currentScenario = 'Walker'; 
+        let pathMesh = null;
+        let mixer = null;
+        let modelActions = {}; 
+        let activeAction = null;
+        let unicycleGroup = null; 
+        
+        const telemetry = { x: 0.00, y: 0.00, angle: 0.00 };
+
+        const moveState = {
+            forward: false, backward: false, rotLeft: false, rotRight: false, strafeLeft: false, strafeRight: false
+        };
+
+        const autoPilot = {
+            active: false, points: [], currIndex: 0, targetPos: new THREE.Vector3(0, 0, TARGET_Z), 
+        };
+
+        const MODELS = {
+            walker: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/Xbot.glb'
+        };
+
+        init();
+        animate();
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB); // <--- ADD THIS LINE (Sky Blue)
+    
+    clock = new THREE.Clock();
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 8, -16);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+            
+            // KEY FIX: Removed Filmic Tone Mapping to prevent desaturation of the sky
+            renderer.toneMapping = THREE.NoToneMapping;
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+            
+            document.body.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.maxPolarAngle = Math.PI / 2.05; 
+            controls.target.set(0, 1.5, 0); 
+
+            // --- Sky Sphere (Guarantees Blue Sky) ---
+            createSkySphere();
+
+            // --- Lighting ---
+            // Adjusted lights to work better without ToneMapping
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3a5f0b, 0.8); 
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2); 
+            dirLight.position.set(30, 50, -20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.bias = -0.0001;
+            dirLight.shadow.radius = 4;
+            const d = 40;
+            dirLight.shadow.camera.left = -d; dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d; dirLight.shadow.camera.bottom = -d;
+            scene.add(dirLight);
+
+            createEnvironment();
+            setupGUI();
+            setupHTMLButtons();
+            setupKeyboard();
+
+            loadCharacter('walker');
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // --- Sky Sphere Generator ---
+function createSkySphere() {
+    const skyGeo = new THREE.SphereGeometry(400, 32, 32);
+    
+    const size = 1024;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // --- Deep Blue Gradient ---
+    const gradient = ctx.createLinearGradient(0, 0, 0, size);
+    gradient.addColorStop(0.0, '#0055ff'); // Zenith
+    gradient.addColorStop(0.5, '#3388ff'); // Horizon area
+    gradient.addColorStop(1.0, '#87CEEB'); // Bottom
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+
+    // --- Clouds ---
+    ctx.filter = 'blur(8px)'; 
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; 
+    
+    for(let i=0; i<25; i++) {
+        const x = Math.random() * size;
+        
+        // HIGHER CLOUDS: Restrict Y to the top 0% - 35% of the canvas
+        // 0.0 is the very top, 0.5 is roughly the horizon.
+        const y = Math.random() * (size * 0.45); 
+        
+        const puffs = 3 + Math.floor(Math.random() * 3);
+        const cloudBaseSize = 40 + Math.random() * 40; 
+        
+        // Helper function to draw cloud puffs
+        const drawCloud = (posX, posY) => {
+            for(let j=0; j<puffs; j++) {
+                const offsetX = (Math.random() - 0.5) * cloudBaseSize * 1.5;
+                const offsetY = (Math.random() - 0.5) * cloudBaseSize * 0.6;
+                const r = cloudBaseSize * (0.6 + Math.random() * 0.4);
+                
+                ctx.beginPath();
+                ctx.arc(posX + offsetX, posY + offsetY, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        };
+
+        // Draw Main Cloud
+        drawCloud(x, y);
+
+        // WRAP AROUND LOGIC (Fixes cut-off clouds)
+        // If near right edge, draw copy on left
+        if(x > size - 100) {
+            drawCloud(x - size, y);
+        }
+        // If near left edge, draw copy on right
+        if(x < 100) {
+            drawCloud(x + size, y);
+        }
+    }
+
+    const skyTex = new THREE.CanvasTexture(canvas);
+    skyTex.colorSpace = THREE.SRGBColorSpace; 
+
+    const skyMat = new THREE.MeshBasicMaterial({ 
+        map: skyTex, 
+        side: THREE.BackSide, 
+        fog: false,
+        depthWrite: false
+    });
+
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(skyMesh);
+}
+
+
+
+
+
+        // --- Procedural Texture Generator ---
+        function createNoiseTexture(width, height, baseColorHex, type = 'noise') {
+            const canvas = document.createElement('canvas');
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            const baseColor = new THREE.Color(baseColorHex);
+            ctx.fillStyle = `#${baseColor.getHexString()}`;
+            ctx.fillRect(0,0,width,height);
+
+            const imgData = ctx.getImageData(0,0,width,height);
+            const data = imgData.data;
+
+            for(let i = 0; i < data.length; i += 4) {
+                const grain = (Math.random() - 0.5) * 30;
+                if (type === 'wood') {
+                    if ((i/4 % width) % 5 === 0) {
+                        data[i]+=grain*1.5; data[i+1]+=grain*1.5; data[i+2]+=grain*1.5;
+                    } else {
+                        data[i]+=grain*0.5; data[i+1]+=grain*0.5; data[i+2]+=grain*0.5;
+                    }
+                } else {
+                    data[i]+=grain; data[i+1]+=grain; data[i+2]+=grain;
+                }
+            }
+            ctx.putImageData(imgData, 0, 0);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        function createEnvironment() {
+            // 1. Ground Plane
+            const floorGeo = new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE);
+            const floorTex = createNoiseTexture(512, 512, 0x3a5f0b); 
+            floorTex.repeat.set(20, 20);
+            const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, metalness: 0.1 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2; 
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // 2. Wooden Fence
+            const woodTex = createNoiseTexture(128, 512, 0x5c4033, 'wood');
+            const woodMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.8, metalness: 0.0 });
+
+            function createFenceSegment(xStart, width) {
+                const group = new THREE.Group();
+                const plankCount = Math.floor(width / 0.6);
+                for(let i=0; i<plankCount; i++) {
+                    const h = 7 + Math.random();
+                    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.5, h, 0.2), woodMat);
+                    plank.position.set(xStart + i*0.6, h/2, WALL_Z_POS);
+                    plank.castShadow = true; plank.receiveShadow = true;
+                    plank.rotation.z = (Math.random() - 0.5) * 0.1;
+                    plank.rotation.y = (Math.random() - 0.5) * 0.1;
+                    group.add(plank);
+                }
+                scene.add(group);
+            }
+
+            const leftWidth = (FLOOR_SIZE/2) - (DOOR_WIDTH/2);
+            createFenceSegment(-(DOOR_WIDTH/2 + leftWidth) + 10, leftWidth - 10); 
+            createFenceSegment((DOOR_WIDTH/2), leftWidth - 10);
+
+            // 3. Target Ring
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), ringMat);
+            targetRing.rotation.x = -Math.PI/2;
+            targetRing.position.set(0, 0.05, TARGET_Z);
+            scene.add(targetRing);
+
+            // 4. Flowers
+            createFlowers();
+        }
+
+        function createFlowers() {
+            const flowerCount = 40;
+            const stemGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.4);
+            const petalGeo = new THREE.CircleGeometry(0.1, 5);
+            
+            const stemMat = new THREE.MeshStandardMaterial({ color: 0x228822 });
+            const colors = [0xffffff, 0xffff00, 0xaa55ff]; 
+
+            for (let i = 0; i < flowerCount; i++) {
+                const group = new THREE.Group();
+                const stem = new THREE.Mesh(stemGeo, stemMat);
+                stem.position.y = 0.2;
+                group.add(stem);
+
+                const petalColor = colors[Math.floor(Math.random() * colors.length)];
+                const petalMat = new THREE.MeshStandardMaterial({ color: petalColor, side: THREE.DoubleSide });
+                
+                for(let j=0; j<5; j++) {
+                    const petal = new THREE.Mesh(petalGeo, petalMat);
+                    petal.position.y = 0.4;
+                    petal.rotation.x = -Math.PI / 3;
+                    petal.rotation.y = (j / 5) * Math.PI * 2;
+                    petal.translateX(0.05);
+                    group.add(petal);
+                }
+
+                let x = (Math.random() - 0.5) * 50;
+                let z = (Math.random() - 0.5) * 50;
+                if (Math.abs(x) < 4 && z < 15 && z > -5) x += 15; 
+
+                group.position.set(x, 0, z);
+                group.scale.setScalar(0.8 + Math.random() * 0.4);
+                group.rotation.x = (Math.random()-0.5)*0.3;
+                group.rotation.z = (Math.random()-0.5)*0.3;
+                scene.add(group);
+            }
+        }
+
+        // --- Visual Helpers (Arrows) ---
+        function createLabelTexture(text) {
+            const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff'; 
+            ctx.font = 'bold 80px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.shadowColor="black"; ctx.shadowBlur=4; 
+            ctx.fillText(text, 64, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+        function createLinearArrow(labelText, length = 2.5) {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({color: 0xffaa00, emissive: 0xff5500, emissiveIntensity: 0.2});
+            const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, length), mat);
+            shaft.rotation.x = -Math.PI / 2; shaft.position.z = length / 2; group.add(shaft);
+            const head = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.5), mat);
+            head.rotation.x = Math.PI / 2; head.position.z = length + 0.25; group.add(head);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: createLabelTexture(labelText), transparent: true, depthTest: false }));
+            sprite.scale.set(1.5, 1.5, 1); sprite.position.set(0, 1.0, length + 0.5); group.add(sprite);
+            group.visible = false; return group;
+        }
+        function createCurvedArrowBezier(labelText, isClockwise) {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({color: 0xffaa00, emissive: 0xff5500, emissiveIntensity: 0.2});
+            const radius = 2.5; const heightY = 0.8; 
+            const start = new THREE.Vector3(0, heightY, 2.0);
+            let control, end;
+            if (isClockwise) { control = new THREE.Vector3(radius, heightY, 2.0); end = new THREE.Vector3(radius, heightY, 0); } 
+            else { control = new THREE.Vector3(-radius, heightY, 2.0); end = new THREE.Vector3(-radius, heightY, 0); }
+            const curve = new THREE.QuadraticBezierCurve3(start, control, end);
+            const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.08, 8, false), mat); group.add(tube);
+            const head = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.5), mat);
+            head.position.copy(end);
+            const tangent = curve.getTangent(1).normalize();
+            head.lookAt(end.clone().add(tangent)); head.rotateX(Math.PI / 2); group.add(head);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: createLabelTexture(labelText), transparent: true, depthTest: false }));
+            sprite.scale.set(1.5, 1.5, 1); sprite.position.copy(end).multiplyScalar(1.3); group.add(sprite);
+            group.visible = false; return group;
+        }
+
+        function addArrowsToCharacter(charGroup) {
+            const arrowSet = {};
+            arrowSet.fwd = createLinearArrow("X"); 
+            arrowSet.back = createLinearArrow("-X"); arrowSet.back.rotation.y = Math.PI;
+            arrowSet.right = createLinearArrow("Z", 2.0); arrowSet.right.rotation.y = -Math.PI / 2;
+            arrowSet.left = createLinearArrow("-Z", 2.0); arrowSet.left.rotation.y = Math.PI / 2;
+            arrowSet.rotL = createCurvedArrowBezier("Y", true); 
+            arrowSet.rotR = createCurvedArrowBezier("-Y", false);
+            for(let key in arrowSet) charGroup.add(arrowSet[key]);
+            charGroup.userData.arrows = arrowSet;
+        }
+
+        // --- Create Realistic Unicycle ---
+        function createUnicycle() {
+            const group = new THREE.Group();
+
+            // 1. Wheel Group (Rotates)
+            const wheelGroup = new THREE.Group();
+
+            // Tire (Rubber) - Dark and Rough
+            const tireGeo = new THREE.TorusGeometry(0.5, 0.08, 16, 32);
+            const tireMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0.1 });
+            const tire = new THREE.Mesh(tireGeo, tireMat);
+            wheelGroup.add(tire);
+
+            // Rim (Metal)
+            const rimGeo = new THREE.TorusGeometry(0.38, 0.04, 8, 24);
+            const rimMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.2, metalness: 0.9 });
+            const rim = new THREE.Mesh(rimGeo, rimMat);
+            wheelGroup.add(rim);
+
+            // Spokes
+            const spokeGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.8);
+            const spokeMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
+            for(let i=0; i<8; i++) {
+                const spoke = new THREE.Mesh(spokeGeo, spokeMat);
+                spoke.rotation.z = (Math.PI / 4) * i;
+                wheelGroup.add(spoke);
+            }
+            // Axle
+            const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.2), rimMat);
+            axle.rotation.x = Math.PI/2;
+            wheelGroup.add(axle);
+
+            // Correct rotation so tire rolls on Z
+            wheelGroup.rotation.y = Math.PI / 2; 
+            
+            group.add(wheelGroup);
+
+            // 2. Frame (Static relative to body)
+            const frameGroup = new THREE.Group();
+            
+            // Fork Legs
+            const forkLegGeo = new THREE.CylinderGeometry(0.03, 0.02, 0.6);
+            const forkMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.6, roughness: 0.4 });
+            
+            const leftLeg = new THREE.Mesh(forkLegGeo, forkMat);
+            leftLeg.position.set(-0.1, 0.5, 0); 
+            frameGroup.add(leftLeg);
+
+            const rightLeg = new THREE.Mesh(forkLegGeo, forkMat);
+            rightLeg.position.set(0.1, 0.5, 0);
+            frameGroup.add(rightLeg);
+
+            // Fork Crown
+            const crown = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.05, 0.08), forkMat);
+            crown.position.set(0, 0.8, 0);
+            frameGroup.add(crown);
+
+            // Seat Post
+            const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3), forkMat);
+            post.position.set(0, 0.95, 0);
+            frameGroup.add(post);
+
+            // Seat (Saddle) - Leather style
+            // Combined shapes for a better seat look
+            const saddleGroup = new THREE.Group();
+            const seatMat = new THREE.MeshStandardMaterial({ color: 0x3d2b1f, roughness: 0.6 }); // Dark brown leather
+            
+            const mainSeat = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.1, 0.4), seatMat);
+            saddleGroup.add(mainSeat);
+            
+            const frontNose = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.15, 16), seatMat);
+            frontNose.rotation.x = -Math.PI/2;
+            frontNose.position.set(0, 0, 0.25);
+            frontNose.scale.set(1, 0.5, 1);
+            saddleGroup.add(frontNose);
+
+            saddleGroup.position.set(0, 1.1, 0);
+            frameGroup.add(saddleGroup);
+
+            // Rotate frame to match wheel orientation
+            frameGroup.rotation.y = Math.PI / 2;
+
+            group.add(frameGroup);
+            group.userData.wheel = wheelGroup;
+
+            return group;
+        }
+
+        // --- Character Loader ---
+        function loadCharacter(type) {
+            const loadingDiv = document.getElementById('loading');
+            loadingDiv.style.display = 'block';
+            stopAutoPilot();
+            
+            if (activeCharacter) scene.remove(activeCharacter);
+            if (mixer) mixer.stopAllAction();
+            mixer = null; modelActions = {}; activeAction = null;
+            unicycleGroup = null;
+            
+            const loader = new GLTFLoader();
+            loader.load(MODELS.walker, (gltf) => {
+                loadingDiv.style.display = 'none';
+                const model = gltf.scene;
+                model.scale.set(1.7, 1.7, 1.7);
+                
+                model.traverse(o => { if(o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+                const container = new THREE.Group();
+                container.position.set(-7, 0, 7);
+                container.rotation.y = Math.PI; 
+
+                if (type === 'walker') {
+                    container.add(model);
+                    mixer = new THREE.AnimationMixer(model);
+                    modelActions.idle = mixer.clipAction(gltf.animations.find(a => a.name === 'idle') || gltf.animations[0]);
+                    modelActions.walk = mixer.clipAction(gltf.animations.find(a => a.name === 'walk') || gltf.animations[1]);
+                    modelActions.idle.play(); activeAction = modelActions.idle;
+                    document.getElementById('btn-s-left').style.display = 'block';
+                    document.getElementById('btn-s-right').style.display = 'block';
+
+                } else {
+// ... inside loadCharacter('unicyclist') else block ...
+
+const uni = createUnicycle();
+uni.position.y = 0.5; 
+unicycleGroup = uni.userData.wheel; 
+container.add(uni);
+
+// LOWERED MANNEQUIN: Changed from 0.5 to 0.42 to seat it on the unicycle
+model.position.y = 0.2; 
+container.add(model);
+
+// ... rest of bone rotations ...
+
+                    let lUpLeg, rUpLeg, lLowLeg, rLowLeg, lArm, rArm;
+                    model.traverse(o => {
+                        if (o.isBone) {
+                            if (o.name === 'mixamorigLeftUpLeg') lUpLeg = o;
+                            if (o.name === 'mixamorigRightUpLeg') rUpLeg = o;
+                            if (o.name === 'mixamorigLeftLeg') lLowLeg = o;
+                            if (o.name === 'mixamorigRightLeg') rLowLeg = o;
+                            if (o.name === 'mixamorigLeftArm') lArm = o;
+                            if (o.name === 'mixamorigRightArm') rArm = o;
+                        }
+                    });
+
+                    if(lUpLeg && rUpLeg && lLowLeg && rLowLeg && lArm && rArm) {
+                        lUpLeg.rotation.x = -Math.PI / 2; rUpLeg.rotation.x = -Math.PI / 2;
+                        lLowLeg.rotation.x = Math.PI / 2; rLowLeg.rotation.x = Math.PI / 2;
+                        lArm.rotation.z = 0; rArm.rotation.z = 0;
+                        lArm.rotation.x = -0.5; rArm.rotation.x = -0.5;
+                    }
+                    
+                    mixer = null; 
+                    document.getElementById('btn-s-left').style.display = 'none';
+                    document.getElementById('btn-s-right').style.display = 'none';
+                }
+
+                const collider = new THREE.Mesh(new THREE.CapsuleGeometry(CHAR_RADIUS, 1.0, 4, 8), new THREE.MeshBasicMaterial({ visible: false }));
+                collider.position.y = 0.85; container.add(collider);
+
+                addArrowsToCharacter(container); 
+
+                activeCharacter = container;
+                currentScenario = type === 'walker' ? 'Walker' : 'Unicyclist';
+                scene.add(activeCharacter);
+                
+            }, undefined, (e) => {
+                console.error(e);
+                loadingDiv.innerText = "Error Loading Model.";
+            });
+        }
+
+        // --- PATHFINDING & CONTROLS ---
+
+        function stopAutoPilot() {
+            autoPilot.active = false;
+            if (pathMesh) { scene.remove(pathMesh); pathMesh = null; }
+        }
+
+        function calculateAndDrawPath() {
+            if (!activeCharacter) return;
+            stopAutoPilot(); 
+            const startPos = activeCharacter.position.clone();
+            const endPos = autoPilot.targetPos.clone();
+            if (currentScenario === 'Walker') calculateWalkerPath(startPos, endPos);
+            else calculateUnicyclePath(startPos, endPos);
+        }
+
+        function calculateUnicyclePath(startPos, endPos) {
+            const dist = startPos.distanceTo(endPos);
+            const scale = dist * 0.4; 
+            const forward = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y);
+            const safeWallZ = WALL_Z_POS - CHAR_RADIUS - 0.2; 
+            let p1 = startPos.clone().add(forward.clone().multiplyScalar(scale));
+            let p2 = endPos.clone().sub(new THREE.Vector3(0,0,1).multiplyScalar(scale)); 
+            if (p1.z > safeWallZ) p1.z = safeWallZ;
+            if (p2.z > safeWallZ) p2.z = safeWallZ;
+            const curve = new THREE.CubicBezierCurve3(startPos, p1, p2, endPos);
+            const points = curve.getPoints(100);
+            points.forEach(p => { 
+                if (p.z > WALL_Z_POS - 0.5 && Math.abs(p.x) > DOOR_WIDTH/2) p.z = WALL_Z_POS - 0.5; 
+            });
+            drawPath(points);
+        }
+
+        function calculateWalkerPath(startPos, endPos) {
+            const points = [startPos];
+            const wallZ = WALL_Z_POS - CHAR_RADIUS;
+            const doorHalf = (DOOR_WIDTH/2) - CHAR_RADIUS;
+            let t = (wallZ - startPos.z) / (endPos.z - startPos.z);
+            let intersectX = startPos.x + t * (endPos.x - startPos.x);
+            if (t > 0 && t < 1 && Math.abs(intersectX) > doorHalf) {
+                points.push(new THREE.Vector3(0, startPos.y, wallZ));
+            }
+            points.push(endPos);
+            const densePoints = [];
+            for(let i=0; i<points.length-1; i++) {
+                const p1 = points[i]; const p2 = points[i+1];
+                const dist = p1.distanceTo(p2);
+                const segments = Math.max(20, Math.floor(dist * 5));
+                for(let j=0; j<=segments; j++) densePoints.push(new THREE.Vector3().lerpVectors(p1, p2, j/segments));
+            }
+            drawPath(densePoints);
+        }
+
+        function drawPath(points) {
+            const geo = new THREE.BufferGeometry().setFromPoints(points);
+            pathMesh = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 3 }));
+            pathMesh.position.y = 0.1; scene.add(pathMesh);
+            autoPilot.points = points; autoPilot.currIndex = 0; autoPilot.active = true;
+        }
+
+        function updateAutoPilot() {
+            if (!autoPilot.active || !activeCharacter) return;
+            if (autoPilot.currIndex >= autoPilot.points.length - 1) {
+                if (currentScenario === 'Walker') {
+                    const targetRot = 0; 
+                    let diff = targetRot - activeCharacter.rotation.y;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    if (Math.abs(diff) > 0.05) {
+                        activeCharacter.rotation.y += diff * 0.1;
+                        return; 
+                    }
+                }
+                stopAutoPilot(); animateCharacter(false, true); return;
+            }
+            const char = activeCharacter;
+            const targetPoint = autoPilot.points[autoPilot.currIndex + 1];
+            const dir = targetPoint.clone().sub(char.position);
+            const step = MOVE_SPEED; 
+            if (dir.length() < step) { char.position.copy(targetPoint); autoPilot.currIndex++; } 
+            else { char.position.add(dir.normalize().multiplyScalar(step)); }
+
+            const angle = Math.atan2(dir.x, dir.z);
+            let diff = angle - char.rotation.y;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            char.rotation.y += diff * 0.1;
+
+            animateCharacter(true, true); 
+        }
+
+        function animateCharacter(isMoving, isForward) {
+            if (currentScenario === 'Walker' && modelActions.walk) {
+                if (isMoving) {
+                    if (activeAction !== modelActions.walk) {
+                        activeAction.fadeOut(0.2); activeAction = modelActions.walk; activeAction.reset().fadeIn(0.2).play();
+                    }
+                    activeAction.timeScale = isForward ? 1.0 : -1.0; 
+                } else {
+                    if (activeAction !== modelActions.idle) {
+                        activeAction.fadeOut(0.2); activeAction = modelActions.idle; activeAction.reset().fadeIn(0.2).play();
+                    }
+                }
+            }
+            if (currentScenario === 'Unicyclist' && unicycleGroup && isMoving) {
+                unicycleGroup.rotation.z += (isForward ? 0.2 : -0.2);
+            }
+        }
+
+        // --- Inputs & GUI ---
+        function setupGUI() {
+            const gui = new GUI({ title: 'Settings' });
+            const params = { type: 'Walker' }; 
+            gui.add(params, 'type', ['Walker', 'Unicyclist']).onChange(v => loadCharacter(v.toLowerCase()));
+
+            const folder = gui.addFolder('Telemetry');
+            folder.add(telemetry, 'y').name('Pos x (Left/Right)').listen().disable().decimals(2); 
+            folder.add(telemetry, 'x').name('Pos y (Fwd/Back)').listen().disable().decimals(2);
+            folder.add(telemetry, 'angle').name('Angle (Rad)').listen().disable().decimals(2);
+            folder.open();
+            
+            gui.domElement.id = 'gui-container';
+        }
+
+        function setupKeyboard() {
+            const keyMap = { 'KeyW': 'forward', 'KeyS': 'backward', 'KeyQ': 'rotLeft', 'KeyE': 'rotRight', 'KeyA': 'strafeLeft', 'KeyD': 'strafeRight' };
+            const handleKey = (code, isDown) => {
+                if (keyMap[code]) {
+                    if (isDown) stopAutoPilot(); 
+                    moveState[keyMap[code]] = isDown;
+                    const btnId = { forward:'btn-fwd', backward:'btn-back', rotLeft:'btn-left', rotRight:'btn-right', strafeLeft:'btn-s-left', strafeRight:'btn-s-right' }[keyMap[code]];
+                    if(btnId) document.getElementById(btnId).classList.toggle('active', isDown);
+                }
+            };
+            window.addEventListener('keydown', (e) => handleKey(e.code, true));
+            window.addEventListener('keyup', (e) => handleKey(e.code, false));
+        }
+
+        function setupHTMLButtons() {
+            document.getElementById('btn-path').onclick = calculateAndDrawPath;
+            const bindBtn = (id, key) => {
+                const btn = document.getElementById(id);
+                btn.addEventListener('mousedown', (e) => { e.preventDefault(); stopAutoPilot(); moveState[key]=true; btn.classList.add('active'); });
+                window.addEventListener('mouseup', (e) => { e.preventDefault(); moveState[key]=false; btn.classList.remove('active'); });
+                btn.addEventListener('touchstart', (e) => { e.preventDefault(); stopAutoPilot(); moveState[key]=true; btn.classList.add('active'); }, {passive:false});
+                btn.addEventListener('touchend', (e) => { e.preventDefault(); moveState[key]=false; btn.classList.remove('active'); });
+            };
+            bindBtn('btn-fwd','forward'); bindBtn('btn-back','backward'); bindBtn('btn-left','rotLeft');
+            bindBtn('btn-right','rotRight'); bindBtn('btn-s-left','strafeLeft'); bindBtn('btn-s-right','strafeRight');
+        }
+
+        function checkCollision(oldPos, newPos) {
+            const wallZ = WALL_Z_POS - CHAR_RADIUS; 
+            if (newPos.z > wallZ) {
+                if (Math.abs(newPos.x) > 100) return newPos; 
+                const doorSafeHalfWidth = (DOOR_WIDTH / 2) - CHAR_RADIUS;
+                if (Math.abs(newPos.x) < doorSafeHalfWidth) return newPos; 
+                return new THREE.Vector3(newPos.x, oldPos.y, wallZ);
+            }
+            return newPos;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            
+            if (mixer) mixer.update(delta);
+
+            if (autoPilot.active) {
+                updateAutoPilot();
+            }
+            else if (activeCharacter) {
+                // Movement
+                const arrows = activeCharacter.userData.arrows;
+                if (arrows) {
+                    arrows.fwd.visible = moveState.forward; 
+                    arrows.back.visible = moveState.backward;
+                    arrows.rotL.visible = moveState.rotLeft; 
+                    arrows.rotR.visible = moveState.rotRight;
+                    arrows.right.visible = moveState.strafeRight && currentScenario === 'Walker';
+                    arrows.left.visible = moveState.strafeLeft && currentScenario === 'Walker';
+                }
+
+                if (moveState.rotLeft) activeCharacter.rotation.y += ROT_SPEED;
+                if (moveState.rotRight) activeCharacter.rotation.y -= ROT_SPEED;
+
+                const currentPos = activeCharacter.position.clone();
+                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y);
+                const right = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y - Math.PI/2);
+                
+                let moveVec = new THREE.Vector3();
+                let isMoving = false;
+                let isForward = true;
+
+                if (moveState.forward) { moveVec.add(forward); isMoving = true; }
+                if (moveState.backward) { moveVec.sub(forward); isMoving = true; isForward = false; }
+                if (currentScenario === 'Walker') { 
+                    if (moveState.strafeRight) { moveVec.add(right); isMoving = true; }
+                    if (moveState.strafeLeft) { moveVec.sub(right); isMoving = true; }
+                }
+
+                animateCharacter(isMoving, isForward);
+
+                if (moveVec.lengthSq() > 0) {
+                    moveVec.normalize().multiplyScalar(MOVE_SPEED);
+                    const proposedPos = currentPos.clone().add(moveVec);
+                    activeCharacter.position.copy(checkCollision(currentPos, proposedPos));
+                }
+
+                // Telemetry
+                telemetry.x = TARGET_Z - activeCharacter.position.z; 
+                telemetry.y = 0 - activeCharacter.position.x; 
+
+                let rawRot = activeCharacter.rotation.y;
+                while(rawRot > Math.PI) rawRot -= Math.PI * 2;
+                while(rawRot < -Math.PI) rawRot += Math.PI * 2;
+                telemetry.angle = rawRot;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
