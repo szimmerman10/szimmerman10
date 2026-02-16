@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js - Vibrant Blue Sky</title>
+    <title>Three.js - Robot Color Scheme</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; user-select: none; -webkit-user-select: none; }
         
@@ -74,7 +74,6 @@
 
     <div id="loading">Loading Models...</div>
 
-
     <div id="controls-area">
         <button id="btn-path">Create Path</button>
         <div class="control-grid">
@@ -129,11 +128,11 @@
         init();
         animate();
 
-function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87CEEB); // <--- ADD THIS LINE (Sky Blue)
-    
-    clock = new THREE.Clock();
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); 
+            
+            clock = new THREE.Clock();
 
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 8, -16);
@@ -143,7 +142,6 @@ function init() {
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
             
-            // KEY FIX: Removed Filmic Tone Mapping to prevent desaturation of the sky
             renderer.toneMapping = THREE.NoToneMapping;
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             
@@ -154,11 +152,8 @@ function init() {
             controls.maxPolarAngle = Math.PI / 2.05; 
             controls.target.set(0, 1.5, 0); 
 
-            // --- Sky Sphere (Guarantees Blue Sky) ---
             createSkySphere();
 
-            // --- Lighting ---
-            // Adjusted lights to work better without ToneMapping
             const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3a5f0b, 0.8); 
             scene.add(hemiLight);
 
@@ -184,81 +179,56 @@ function init() {
         }
 
         // --- Sky Sphere Generator ---
-function createSkySphere() {
-    const skyGeo = new THREE.SphereGeometry(400, 32, 32);
-    
-    const size = 1024;
-    const canvas = document.createElement('canvas');
-    canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d');
+        function createSkySphere() {
+            const skyGeo = new THREE.SphereGeometry(400, 32, 32);
+            
+            const size = 1024;
+            const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
 
-    // --- Deep Blue Gradient ---
-    const gradient = ctx.createLinearGradient(0, 0, 0, size);
-    gradient.addColorStop(0.0, '#0055ff'); // Zenith
-    gradient.addColorStop(0.5, '#3388ff'); // Horizon area
-    gradient.addColorStop(1.0, '#87CEEB'); // Bottom
-    
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
+            const gradient = ctx.createLinearGradient(0, 0, 0, size);
+            gradient.addColorStop(0.0, '#0055ff'); 
+            gradient.addColorStop(0.5, '#3388ff'); 
+            gradient.addColorStop(1.0, '#87CEEB'); 
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
 
-    // --- Clouds ---
-    ctx.filter = 'blur(8px)'; 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; 
-    
-    for(let i=0; i<25; i++) {
-        const x = Math.random() * size;
-        
-        // HIGHER CLOUDS: Restrict Y to the top 0% - 35% of the canvas
-        // 0.0 is the very top, 0.5 is roughly the horizon.
-        const y = Math.random() * (size * 0.45); 
-        
-        const puffs = 3 + Math.floor(Math.random() * 3);
-        const cloudBaseSize = 40 + Math.random() * 40; 
-        
-        // Helper function to draw cloud puffs
-        const drawCloud = (posX, posY) => {
-            for(let j=0; j<puffs; j++) {
-                const offsetX = (Math.random() - 0.5) * cloudBaseSize * 1.5;
-                const offsetY = (Math.random() - 0.5) * cloudBaseSize * 0.6;
-                const r = cloudBaseSize * (0.6 + Math.random() * 0.4);
+            ctx.filter = 'blur(8px)'; 
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; 
+            
+            for(let i=0; i<25; i++) {
+                const x = Math.random() * size;
+                const y = Math.random() * (size * 0.45); 
+                const puffs = 3 + Math.floor(Math.random() * 3);
+                const cloudBaseSize = 40 + Math.random() * 40; 
                 
-                ctx.beginPath();
-                ctx.arc(posX + offsetX, posY + offsetY, r, 0, Math.PI * 2);
-                ctx.fill();
+                const drawCloud = (posX, posY) => {
+                    for(let j=0; j<puffs; j++) {
+                        const offsetX = (Math.random() - 0.5) * cloudBaseSize * 1.5;
+                        const offsetY = (Math.random() - 0.5) * cloudBaseSize * 0.6;
+                        const r = cloudBaseSize * (0.6 + Math.random() * 0.4);
+                        ctx.beginPath();
+                        ctx.arc(posX + offsetX, posY + offsetY, r, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                };
+                drawCloud(x, y);
+                if(x > size - 100) drawCloud(x - size, y);
+                if(x < 100) drawCloud(x + size, y);
             }
-        };
 
-        // Draw Main Cloud
-        drawCloud(x, y);
+            const skyTex = new THREE.CanvasTexture(canvas);
+            skyTex.colorSpace = THREE.SRGBColorSpace; 
 
-        // WRAP AROUND LOGIC (Fixes cut-off clouds)
-        // If near right edge, draw copy on left
-        if(x > size - 100) {
-            drawCloud(x - size, y);
+            const skyMat = new THREE.MeshBasicMaterial({ 
+                map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false
+            });
+
+            const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+            scene.add(skyMesh);
         }
-        // If near left edge, draw copy on right
-        if(x < 100) {
-            drawCloud(x + size, y);
-        }
-    }
-
-    const skyTex = new THREE.CanvasTexture(canvas);
-    skyTex.colorSpace = THREE.SRGBColorSpace; 
-
-    const skyMat = new THREE.MeshBasicMaterial({ 
-        map: skyTex, 
-        side: THREE.BackSide, 
-        fog: false,
-        depthWrite: false
-    });
-
-    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
-    scene.add(skyMesh);
-}
-
-
-
-
 
         // --- Procedural Texture Generator ---
         function createNoiseTexture(width, height, baseColorHex, type = 'noise') {
@@ -292,7 +262,6 @@ function createSkySphere() {
         }
 
         function createEnvironment() {
-            // 1. Ground Plane
             const floorGeo = new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE);
             const floorTex = createNoiseTexture(512, 512, 0x3a5f0b); 
             floorTex.repeat.set(20, 20);
@@ -302,7 +271,6 @@ function createSkySphere() {
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // 2. Wooden Fence
             const woodTex = createNoiseTexture(128, 512, 0x5c4033, 'wood');
             const woodMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.8, metalness: 0.0 });
 
@@ -325,14 +293,12 @@ function createSkySphere() {
             createFenceSegment(-(DOOR_WIDTH/2 + leftWidth) + 10, leftWidth - 10); 
             createFenceSegment((DOOR_WIDTH/2), leftWidth - 10);
 
-            // 3. Target Ring
             const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
             const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), ringMat);
             targetRing.rotation.x = -Math.PI/2;
             targetRing.position.set(0, 0.05, TARGET_Z);
             scene.add(targetRing);
 
-            // 4. Flowers
             createFlowers();
         }
 
@@ -386,7 +352,7 @@ function createSkySphere() {
         }
         function createLinearArrow(labelText, length = 2.5) {
             const group = new THREE.Group();
-            const mat = new THREE.MeshStandardMaterial({color: 0xffaa00, emissive: 0xff5500, emissiveIntensity: 0.2});
+            const mat = new THREE.MeshStandardMaterial({color: 0xC0C0C0, emissive: 0xffffff, emissiveIntensity: 0.2});
             const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, length), mat);
             shaft.rotation.x = -Math.PI / 2; shaft.position.z = length / 2; group.add(shaft);
             const head = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.5), mat);
@@ -397,7 +363,7 @@ function createSkySphere() {
         }
         function createCurvedArrowBezier(labelText, isClockwise) {
             const group = new THREE.Group();
-            const mat = new THREE.MeshStandardMaterial({color: 0xffaa00, emissive: 0xff5500, emissiveIntensity: 0.2});
+            const mat = new THREE.MeshStandardMaterial({color: 0xC0C0C0, emissive: 0xffffff, emissiveIntensity: 0.2});
             const radius = 2.5; const heightY = 0.8; 
             const start = new THREE.Vector3(0, heightY, 2.0);
             let control, end;
@@ -429,23 +395,18 @@ function createSkySphere() {
         // --- Create Realistic Unicycle ---
         function createUnicycle() {
             const group = new THREE.Group();
-
-            // 1. Wheel Group (Rotates)
             const wheelGroup = new THREE.Group();
 
-            // Tire (Rubber) - Dark and Rough
             const tireGeo = new THREE.TorusGeometry(0.5, 0.08, 16, 32);
             const tireMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0.1 });
             const tire = new THREE.Mesh(tireGeo, tireMat);
             wheelGroup.add(tire);
 
-            // Rim (Metal)
             const rimGeo = new THREE.TorusGeometry(0.38, 0.04, 8, 24);
             const rimMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.2, metalness: 0.9 });
             const rim = new THREE.Mesh(rimGeo, rimMat);
             wheelGroup.add(rim);
 
-            // Spokes
             const spokeGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.8);
             const spokeMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
             for(let i=0; i<8; i++) {
@@ -453,20 +414,13 @@ function createSkySphere() {
                 spoke.rotation.z = (Math.PI / 4) * i;
                 wheelGroup.add(spoke);
             }
-            // Axle
             const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.2), rimMat);
             axle.rotation.x = Math.PI/2;
             wheelGroup.add(axle);
-
-            // Correct rotation so tire rolls on Z
             wheelGroup.rotation.y = Math.PI / 2; 
-            
             group.add(wheelGroup);
 
-            // 2. Frame (Static relative to body)
             const frameGroup = new THREE.Group();
-            
-            // Fork Legs
             const forkLegGeo = new THREE.CylinderGeometry(0.03, 0.02, 0.6);
             const forkMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.6, roughness: 0.4 });
             
@@ -478,20 +432,16 @@ function createSkySphere() {
             rightLeg.position.set(0.1, 0.5, 0);
             frameGroup.add(rightLeg);
 
-            // Fork Crown
             const crown = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.05, 0.08), forkMat);
             crown.position.set(0, 0.8, 0);
             frameGroup.add(crown);
 
-            // Seat Post
             const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3), forkMat);
             post.position.set(0, 0.95, 0);
             frameGroup.add(post);
 
-            // Seat (Saddle) - Leather style
-            // Combined shapes for a better seat look
             const saddleGroup = new THREE.Group();
-            const seatMat = new THREE.MeshStandardMaterial({ color: 0x3d2b1f, roughness: 0.6 }); // Dark brown leather
+            const seatMat = new THREE.MeshStandardMaterial({ color: 0x3d2b1f, roughness: 0.6 }); 
             
             const mainSeat = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.1, 0.4), seatMat);
             saddleGroup.add(mainSeat);
@@ -504,8 +454,6 @@ function createSkySphere() {
 
             saddleGroup.position.set(0, 1.1, 0);
             frameGroup.add(saddleGroup);
-
-            // Rotate frame to match wheel orientation
             frameGroup.rotation.y = Math.PI / 2;
 
             group.add(frameGroup);
@@ -531,7 +479,38 @@ function createSkySphere() {
                 const model = gltf.scene;
                 model.scale.set(1.7, 1.7, 1.7);
                 
-                model.traverse(o => { if(o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+                // --- CUSTOM MATERIAL LOGIC START ---
+                // Robot Colors: White body, Dark metallic joints, Cyan eyes
+                const matBody = new THREE.MeshStandardMaterial({ 
+                    color: 0xffffff, roughness: 0.3, metalness: 0.1 
+                });
+                
+                const matJoints = new THREE.MeshStandardMaterial({ 
+                    color: 0x222222, roughness: 0.5, metalness: 0.8 
+                });
+
+                const matEyes = new THREE.MeshStandardMaterial({
+                    color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2.0
+                });
+
+                model.traverse(o => { 
+                    if(o.isMesh) { 
+                        o.castShadow = true; 
+                        o.receiveShadow = true; 
+                        
+                        // Apply materials based on mesh names (Standard Xbot naming)
+                        if (o.name.includes('Joints')) {
+                            o.material = matJoints;
+                        } else if (o.name.includes('Alpha') || o.name.includes('Glass')) {
+                            // Some versions have a separate glass/eye mesh
+                            o.material = matEyes;
+                        } else {
+                            // Default to white body for "Surface" or "Body" meshes
+                            o.material = matBody;
+                        }
+                    } 
+                });
+                // --- CUSTOM MATERIAL LOGIC END ---
 
                 const container = new THREE.Group();
                 container.position.set(-7, 0, 7);
@@ -547,18 +526,13 @@ function createSkySphere() {
                     document.getElementById('btn-s-right').style.display = 'block';
 
                 } else {
-// ... inside loadCharacter('unicyclist') else block ...
+                    const uni = createUnicycle();
+                    uni.position.y = 0.5; 
+                    unicycleGroup = uni.userData.wheel; 
+                    container.add(uni);
 
-const uni = createUnicycle();
-uni.position.y = 0.5; 
-unicycleGroup = uni.userData.wheel; 
-container.add(uni);
-
-// LOWERED MANNEQUIN: Changed from 0.5 to 0.42 to seat it on the unicycle
-model.position.y = 0.2; 
-container.add(model);
-
-// ... rest of bone rotations ...
+                    model.position.y = 0.2; 
+                    container.add(model);
 
                     let lUpLeg, rUpLeg, lLowLeg, rLowLeg, lArm, rArm;
                     model.traverse(o => {
@@ -711,8 +685,17 @@ container.add(model);
         // --- Inputs & GUI ---
         function setupGUI() {
             const gui = new GUI({ title: 'Settings' });
-            const params = { type: 'Walker' }; 
-            gui.add(params, 'type', ['Walker', 'Unicyclist']).onChange(v => loadCharacter(v.toLowerCase()));
+            
+            // --- UPDATED GUI BUTTON ---
+            const params = { 
+                switchMode: () => {
+                    // Toggles between walker and unicyclist
+                    const nextMode = currentScenario === 'Walker' ? 'unicyclist' : 'walker';
+                    loadCharacter(nextMode); 
+                }
+            };
+            gui.add(params, 'switchMode').name('Switch Character');
+            // ---------------------------
 
             const folder = gui.addFolder('Telemetry');
             folder.add(telemetry, 'y').name('Pos x (Left/Right)').listen().disable().decimals(2); 
