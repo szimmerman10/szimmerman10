@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Kinematic Sphere Simulation (Distant Atmosphere)</title>
+    <title>Cartan's Rolling Spheres</title>
     <style>
         body { 
             margin: 0; 
@@ -307,6 +307,35 @@
     const vCtrl = manualFolder.add(guiParams, 'v', 0, Math.PI * 2, 0.01).name('Latitude (v)').listen().onChange(handleManualUpdate);
     const wCtrl = manualFolder.add(guiParams, 'w', 0, Math.PI * 2, 0.01).name('Spin (w)').listen().onChange(handleManualUpdate);
     wCtrl.disable();
+
+    // --- Custom Footer Injection ---
+    const footerContainer = document.createElement('div');
+    
+    // Style container to fit nicely in GUI
+    Object.assign(footerContainer.style, {
+        padding: '12px 10px',
+        fontSize: '11px',
+        lineHeight: '1.4',
+        color: '#aaa',
+        borderTop: '1px solid #333',
+        marginTop: '5px',
+        fontFamily: 'sans-serif'
+    });
+
+    // Insert provided HTML. Added <style> block to ensure links are visible on dark theme.
+    footerContainer.innerHTML = `
+        <style>
+            .gui-footer-text a { color: #8ec0ff; text-decoration: none; }
+            .gui-footer-text a:hover { text-decoration: underline; color: #fff; }
+            .gui-footer-text img { vertical-align: middle; }
+        </style>
+        <div class="gui-footer-text">
+            <a href="https://szimmerman10.github.io/szimmerman10/spheres.html">Cartan's Rolling Spheres</a> © 2026 by <a href="https://www.zimmermanmath.com">Scott Zimmerman</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/sa.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">
+        </div>
+    `;
+    
+    // Append to the main GUI container
+    gui.domElement.appendChild(footerContainer);
 
     if (window.innerWidth <= 600) gui.close();
 
