@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js - Robot Color Scheme</title>
+    <title>Unicycling With Heisenberg</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; user-select: none; -webkit-user-select: none; }
         
@@ -462,6 +462,93 @@
             return group;
         }
 
+        // --- Create Head Accessories (Hat, Glasses, Beard) ---
+        function createHeadAccessories() {
+            const group = new THREE.Group();
+
+            // Materials
+            const hatMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x050505, metalness: 0.8, roughness: 0.2 });
+            const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x000000, metalness: 0.8, roughness: 0.1, transparent: true, opacity: 0.95 });
+            const beardMat = new THREE.MeshStandardMaterial({ color: 0x331a00, roughness: 1.0 });
+
+            // --- Hat (Pork Pie Style) ---
+            const hatGroup = new THREE.Group();
+            const hatBrimGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.015, 32); 
+            const hatBrim = new THREE.Mesh(hatBrimGeo, hatMat);
+            hatBrim.position.set(0, 0.0, 0);
+            hatGroup.add(hatBrim);
+
+            const hatTopGeo = new THREE.CylinderGeometry(0.17, 0.17, 0.13, 32); 
+            const hatTop = new THREE.Mesh(hatTopGeo, hatMat);
+            hatTop.position.y = 0.07;
+            hatGroup.add(hatTop);
+            
+            // Final position relative to head bone
+            // NOTE: Mixamo head bone usually points UP (+Y). Z is forward.
+            // These numbers position the hat on top of the head.
+            hatGroup.position.set(0, 0, -0.05);
+            hatGroup.rotation.x = -0.1; 
+            group.add(hatGroup);
+
+            // --- Glasses (Dark Sunglasses) ---
+            const glassesGroup = new THREE.Group();
+            const frameGeo = new THREE.BoxGeometry(0.06, 0.045, 0.005);
+            const lensGeo = new THREE.PlaneGeometry(0.05, 0.035);
+
+            const leftFrame = new THREE.Mesh(frameGeo, frameMat);
+            leftFrame.position.set(-0.055, 0, 0);
+            glassesGroup.add(leftFrame);
+            const leftLens = new THREE.Mesh(lensGeo, lensMat);
+            leftLens.position.set(-0.055, 0, 0.003);
+            glassesGroup.add(leftLens);
+
+            const rightFrame = new THREE.Mesh(frameGeo, frameMat);
+            rightFrame.position.set(0.055, 0, 0);
+            glassesGroup.add(rightFrame);
+            const rightLens = new THREE.Mesh(lensGeo, lensMat);
+            rightLens.position.set(0.055, 0, 0.003);
+            glassesGroup.add(rightLens);
+
+            const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.005, 0.005), frameMat);
+            bridge.position.set(0, 0.015, 0);
+            glassesGroup.add(bridge);
+
+            const armGeo = new THREE.BoxGeometry(0.005, 0.005, 0.18);
+            const leftArm = new THREE.Mesh(armGeo, frameMat);
+            leftArm.position.set(-0.085, 0.01, -0.09);
+            glassesGroup.add(leftArm);
+            const rightArm = new THREE.Mesh(armGeo, frameMat);
+            rightArm.position.set(0.085, 0.01, -0.09);
+            glassesGroup.add(rightArm);
+
+            // Positioned over eyes
+            glassesGroup.position.set(0, -0.12, 0.2);
+            group.add(glassesGroup);
+
+            // --- Beard (Goatee) ---
+            const beardGroup = new THREE.Group();
+            const chinBeard = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.12, 4), beardMat);
+            chinBeard.rotation.x = -Math.PI/4;
+            chinBeard.rotation.y = Math.PI / 4; 
+            chinBeard.position.set(0, -0.03, 0.12); 
+            beardGroup.add(chinBeard);
+            
+            const mustache = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.03, 0.02), beardMat);
+            mustache.position.set(0, 0.04, 0.18);
+            // Slight translation to curve it
+            mustache.geometry.translate(0, -0.01, 0);
+            beardGroup.add(mustache);
+
+		beardGroup.position.set(0, -0.26, 0.03);
+
+            group.add(beardGroup);
+            
+            // Adjusted Scale: 1.0 (Since model is 1.7x, this results in ~1.7 world size)
+            group.scale.setScalar(60.0); 
+            return group;
+        }
+
         // --- Character Loader ---
         function loadCharacter(type) {
             const loadingDiv = document.getElementById('loading');
@@ -479,39 +566,36 @@
                 const model = gltf.scene;
                 model.scale.set(1.7, 1.7, 1.7);
                 
-                // --- CUSTOM MATERIAL LOGIC START ---
-                // Robot Colors: White body, Dark metallic joints, Cyan eyes
                 const matBody = new THREE.MeshStandardMaterial({ 
                     color: 0xffffff, roughness: 0.3, metalness: 0.1 
                 });
-                
                 const matJoints = new THREE.MeshStandardMaterial({ 
                     color: 0x222222, roughness: 0.5, metalness: 0.8 
                 });
-
                 const matEyes = new THREE.MeshStandardMaterial({
                     color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2.0
                 });
 
+                let headBone = null;
+
                 model.traverse(o => { 
+                    // Robust check for Head bone
+                    if (o.isBone && o.name.toLowerCase().includes('head')) {
+                        headBone = o;
+                        console.log("Head bone found: " + o.name);
+                    }
                     if(o.isMesh) { 
                         o.castShadow = true; 
                         o.receiveShadow = true; 
-                        
-                        // Apply materials based on mesh names (Standard Xbot naming)
-                        if (o.name.includes('Joints')) {
-                            o.material = matJoints;
-                        } else if (o.name.includes('Alpha') || o.name.includes('Glass')) {
-                            // Some versions have a separate glass/eye mesh
-                            o.material = matEyes;
-                        } else {
-                            // Default to white body for "Surface" or "Body" meshes
-                            o.material = matBody;
-                        }
+                        if (o.name.includes('Joints')) o.material = matJoints;
+                        else if (o.name.includes('Alpha') || o.name.includes('Glass')) o.material = matEyes;
+                        else o.material = matBody;
                     } 
                 });
-                // --- CUSTOM MATERIAL LOGIC END ---
 
+
+                
+                // 3. Setup Container
                 const container = new THREE.Group();
                 container.position.set(-7, 0, 7);
                 container.rotation.y = Math.PI; 
@@ -531,9 +615,14 @@
                     unicycleGroup = uni.userData.wheel; 
                     container.add(uni);
 
+                // --- ATTACH HEAD ACCESSORIES ---
+                const accessories = createHeadAccessories();
+                    headBone.add(accessories);
+
                     model.position.y = 0.2; 
                     container.add(model);
 
+                    // Unicycle pose logic
                     let lUpLeg, rUpLeg, lLowLeg, rLowLeg, lArm, rArm;
                     model.traverse(o => {
                         if (o.isBone) {
@@ -725,7 +814,8 @@
                     .gui-footer-text img { vertical-align: middle; }
                 </style>
                 <div class="gui-footer-text">
-                    <a href="https://szimmerman10.github.io/szimmerman10/unicycle.html">Unicycling With Heisenberg</a> © 2026 by <a href="https://www.zimmermanmath.com">Scott Zimmerman</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/sa.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">
+                    <a href="https://szimmerman10.github.io/szimmerman10/unicycle.html">Unicycling With Heisenberg</a> © 2026 by <a href="https://www.zimmermanmath.com">Scott Zimmerman</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/sa.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">.
+		Created using <a href="https://gemini.google.com/">Google Gemini.</a>
                 </div>
             `;
             
