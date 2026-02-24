@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dice Frequency Simulator</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        h1 { color: #2c3e50; margin-bottom: 20px; }
+
+        .main-container {
+            width: 100%;
+            max-width: 800px;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        /* --- Controls --- */
+        .dice-groups-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .dice-row {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+
+        label {
+            font-size: 0.85em;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        input {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 1em;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* --- Buttons --- */
+        button {
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+
+        .btn-secondary {
+            background-color: #2ecc71;
+            color: white;
+            padding: 10px 20px;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+        }
+        .btn-secondary:hover { background-color: #27ae60; }
+
+        .btn-remove {
+            background-color: #e74c3c;
+            color: white;
+            padding: 0 15px;
+            height: 40px; /* Match input height */
+            align-self: flex-end;
+        }
+        .btn-remove:hover { background-color: #c0392b; }
+
+        .global-settings {
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .btn-primary {
+            background-color: #3498db;
+            color: white;
+            padding: 15px;
+            font-size: 1.1em;
+            width: 100%;
+        }
+        .btn-primary:hover { background-color: #2980b9; }
+
+        /* --- Results Table --- */
+        #results-container {
+            margin-top: 30px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background-color: #2c3e50;
+            color: white;
+            text-transform: uppercase;
+            font-size: 0.85em;
+        }
+
+        .bar-container {
+            width: 100%;
+            background: #eee;
+            height: 10px;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            background-color: #3498db;
+        }
+
+        .error {
+            color: #e74c3c;
+            margin-top: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Dice Frequency Simulator</h1>
+
+    <div class="main-container">
+        
+        <div id="dice-groups" class="dice-groups-container">
+            </div>
+
+        <button class="btn-secondary" onclick="addDiceGroup()">+ Add Dice Group</button>
+
+        <div class="global-settings">
+            <div class="input-group">
+                <label for="numRolls">Total Simulations (Rolls)</label>
+                <input type="number" id="numRolls" value="100" min="1">
+            </div>
+            
+            <button class="btn-primary" onclick="calculateStats()">Roll Dice</button>
+        </div>
+
+        <div id="error-msg" class="error"></div>
+        <div id="results-container"></div>
+    </div>
+
+    <script>
+        // Initialize with default 2d6
+        document.addEventListener('DOMContentLoaded', () => {
+            addDiceGroup(2, 6); 
+        });
+
+        function addDiceGroup(count = 1, sides = 6) {
+            const container = document.getElementById('dice-groups');
+            const id = Date.now();
+            const div = document.createElement('div');
+            div.className = 'dice-row';
+            div.id = `group-${id}`;
+            div.innerHTML = `
+                <div class="input-group">
+                    <label>Number of Dice</label>
+                    <input type="number" class="d-count" value="${count}" min="1">
+                </div>
+                <div class="input-group">
+                    <label>Sides (d?)</label>
+                    <input type="number" class="d-sides" value="${sides}" min="2">
+                </div>
+                <button class="btn-remove" onclick="removeGroup('${div.id}')">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
+        function removeGroup(id) {
+            const rows = document.querySelectorAll('.dice-row');
+            if (rows.length > 1) {
+                document.getElementById(id).remove();
+            } else {
+                alert("You need at least one group of dice.");
+            }
+        }
+
+        function calculateStats() {
+            const errorDiv = document.getElementById('error-msg');
+            const resultsDiv = document.getElementById('results-container');
+            
+            errorDiv.textContent = "";
+            resultsDiv.innerHTML = "";
+
+            const totalRolls = parseInt(document.getElementById('numRolls').value);
+            if (isNaN(totalRolls) || totalRolls < 1) {
+                errorDiv.textContent = "Please enter a valid number of simulations.";
+                return;
+            }
+
+            // Collect inputs
+            const groups = [];
+            const rows = document.querySelectorAll('.dice-row');
+            
+            rows.forEach(row => {
+                const count = parseInt(row.querySelector('.d-count').value);
+                const sides = parseInt(row.querySelector('.d-sides').value);
+                if (count > 0 && sides > 1) {
+                    groups.push({ count, sides });
+                }
+            });
+
+            if (groups.length === 0) {
+                errorDiv.textContent = "Invalid dice configuration.";
+                return;
+            }
+
+            // Run Simulation
+            const frequencyMap = {};
+            
+            for (let i = 0; i < totalRolls; i++) {
+                let currentSum = 0;
+                
+                // For every group, roll X dice of Y sides
+                for (let g = 0; g < groups.length; g++) {
+                    const group = groups[g];
+                    for (let d = 0; d < group.count; d++) {
+                        currentSum += Math.floor(Math.random() * group.sides) + 1;
+                    }
+                }
+
+                frequencyMap[currentSum] = (frequencyMap[currentSum] || 0) + 1;
+            }
+
+            // Render Results
+            renderTable(frequencyMap, totalRolls);
+        }
+
+        function renderTable(map, total) {
+            const sums = Object.keys(map).map(Number).sort((a, b) => a - b);
+            const maxFreq = Math.max(...Object.values(map));
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Sum</th>
+                            <th>Frequency</th>
+                            <th style="width: 40%">Distribution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            sums.forEach(sum => {
+                const count = map[sum];
+                const barWidth = (count / maxFreq) * 100;
+
+                html += `
+                    <tr>
+                        <td><strong>${sum}</strong></td>
+                        <td>${count}</td>
+                        <td style="text-align: left;">
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: ${barWidth}%"></div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            document.getElementById('results-container').innerHTML = html;
+        }
+    </script>
+</body>
+</html>
