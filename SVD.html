@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Interactive SVD Visualizer</title>
+    <title>Z-Up SVD Visualizer</title>
     <style>
         body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: 'Segoe UI', sans-serif; color: white; }
         
@@ -46,7 +46,7 @@
         #math-display {
             position: absolute; top: 10px; left: 330px;
             display: flex; gap: 10px; align-items: flex-start;
-            pointer-events: none; /* Let clicks pass through */
+            pointer-events: none;
         }
         .math-block {
             background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px;
@@ -113,14 +113,15 @@
 </div>
 
 <script>
-    // Standard Global Script (No 'type=module' needed)
-
     // --- 1. INITIALIZATION ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a1a);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(6, 6, 9);
+    
+    // Z-UP SETUP:
+    camera.up.set(0, 0, 1); // Tell camera that Z is up
+    camera.position.set(6, 6, 6); // Position accordingly
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -135,22 +136,57 @@
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(5, 10, 7);
+    dirLight.position.set(5, 5, 10); // Light from top-side
     scene.add(dirLight);
 
     // Helpers
+    // Grid Helper defaults to XZ plane. We rotate it to XY plane.
     const gridHelper = new THREE.GridHelper(20, 20, 0x333333, 0x222222);
+    gridHelper.rotation.x = Math.PI / 2;
     scene.add(gridHelper);
     
+    // --- AXES & LABELS ---
     function createAxisLine(color, dir) {
         const mat = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.3 });
         const points = [new THREE.Vector3(0,0,0), dir.clone().multiplyScalar(10)];
         const geo = new THREE.BufferGeometry().setFromPoints(points);
         return new THREE.Line(geo, mat);
     }
-    scene.add(createAxisLine(0xff0000, new THREE.Vector3(1,0,0)));
-    scene.add(createAxisLine(0x00ff00, new THREE.Vector3(0,1,0)));
-    scene.add(createAxisLine(0x0000ff, new THREE.Vector3(0,0,1)));
+    scene.add(createAxisLine(0xff0000, new THREE.Vector3(1,0,0))); // X
+    scene.add(createAxisLine(0x00ff00, new THREE.Vector3(0,1,0))); // Y
+    scene.add(createAxisLine(0x0000ff, new THREE.Vector3(0,0,1))); // Z
+
+    function makeTextSprite(message, color) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 128; 
+        canvas.height = 128;
+        
+        ctx.font = "Bold 60px Arial";
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(message, 64, 64);
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+        const sprite = new THREE.Sprite(spriteMaterial);
+        sprite.scale.set(0.8, 0.8, 0.8);
+        return sprite;
+    }
+
+    const labelX = makeTextSprite("X", "#ff5555");
+    labelX.position.set(2.2, 0, 0);
+    scene.add(labelX);
+
+    const labelY = makeTextSprite("Y", "#55ff55");
+    labelY.position.set(0, 2.2, 0);
+    scene.add(labelY);
+
+    const labelZ = makeTextSprite("Z", "#5555ff");
+    labelZ.position.set(0, 0, 2.2);
+    scene.add(labelZ);
+
 
     // --- 2. OBJECTS TO ANIMATE ---
     const vectorGroup = new THREE.Group();
@@ -160,6 +196,7 @@
     const colors = [0xff3333, 0x33ff33, 0x3388ff];
     const arrows = [];
     for(let i=0; i<3; i++){
+        // X, Y, Z basis
         const dir = new THREE.Vector3(i===0, i===1, i===2);
         const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0,0,0), 1, colors[i], 0.2, 0.1);
         arrows.push(arrow);
@@ -178,7 +215,6 @@
     deformGroup.add(sphereMesh);
 
     // Parallelepiped (Unit Cube Wireframe)
-    // Custom geometry to match the standard basis cornered at origin
     const unitCubeGeo = new THREE.BufferGeometry();
     const vertices = [
         0,0,0, 1,0,0,  0,0,0, 0,1,0,  0,0,0, 0,0,1, // Axes
