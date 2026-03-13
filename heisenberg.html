@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Interactive Heisenberg Group</title>
+    <title>Interactive Contact Structures</title>
     <style>
         body {
             margin: 0;
@@ -34,7 +34,6 @@
         const scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x111111, 0.02);
 
-        // FIXED: Reduced near plane to 0.01 to prevent clipping when close to the curve
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
         camera.up.set(0, 0, 1);
         
@@ -70,7 +69,6 @@
 
         // 3. Add Axes Helper
         const axesHelper = new THREE.AxesHelper(10);
-        // Set X, Y, and Z axes colors to white
         axesHelper.setColors(0x808080, 0x808080, 0x808080); 
         scene.add(axesHelper);
 
@@ -98,19 +96,13 @@
         }
 
         starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-
-        const starMaterial = new THREE.PointsMaterial({
-            color: 0xffffff,
-            size: 0.15,
-            sizeAttenuation: true, 
-            fog: false 
-        });
-
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, sizeAttenuation: true, fog: false });
         const stars = new THREE.Points(starGeometry, starMaterial);
         scene.add(stars);
 
         // 4. GUI Settings State
         const settings = {
+            contactForm: 'Symmetric', // 'Symmetric' or 'Darboux'
             showPlanes: false,
             showZZeroOnly: false,
             pointSpacing: 1.0, 
@@ -118,10 +110,7 @@
             flyAlongCurve: function() { startFlight(); } 
         };
 
-        // 5. Build the Planes
-        const planesGroup = new THREE.Group();
-        scene.add(planesGroup);
-        
+        // 5. Build the Planes (Optimized with InstancedMesh)
         const planeGeometry = new THREE.CircleGeometry(0.25, 32); 
         const planeMaterial = new THREE.MeshNormalMaterial({
             side: THREE.DoubleSide,
@@ -129,64 +118,93 @@
             opacity: 0.85
         });
 
-        const planesData = [];
+        const totalPlanes = 11 * 11 * 9;
+        const instancedPlanes = new THREE.InstancedMesh(planeGeometry, planeMaterial, totalPlanes);
+        instancedPlanes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        scene.add(instancedPlanes);
 
-        for (let i = -5; i <= 5; i++) {
-            for (let j = -5; j <= 5; j++) {
-                for (let k = 0; k <= 8; k++) { 
-                    const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-                    planesGroup.add(plane);
-                    planesData.push({ mesh: plane, i: i, j: j, k: k });
-                }
-            }
-        }
+        const dummy = new THREE.Object3D();
 
         function updatePlanes() {
-            planesGroup.visible = settings.showPlanes;
+            instancedPlanes.visible = settings.showPlanes;
+            if (!settings.showPlanes) return;
+
             const spacing = settings.pointSpacing;
+            let index = 0;
 
-            planesData.forEach(item => {
-                const x = item.i * spacing;
-                const y = item.j * spacing;
-                const z = item.k * spacing;
+            for (let i = -5; i <= 5; i++) {
+                for (let j = -5; j <= 5; j++) {
+                    for (let k = 0; k <= 8; k++) {
+                        const showPlane = settings.showZZeroOnly ? (k === 0) : true;
+                        
+                        if (showPlane) {
+                            const x = i * spacing;
+                            const y = j * spacing;
+                            const z = k * spacing;
 
-                item.mesh.position.set(x, y, z);
+                            dummy.position.set(x, y, z);
 
-                const nx = -0.5 * y;
-                const ny = 0.5 * x;
-                const nz = 1;
+                            let nx, ny, nz;
+                            if (settings.contactForm === 'Symmetric') {
+                                // Symmetric Form: dz - 0.5(y dx - x dy) = 0
+                                nx = -0.5 * y;
+                                ny = 0.5 * x;
+                                nz = 1;
+                            } else if (settings.contactForm === 'Darboux') {
+                                // Darboux Form: dz - y dx = 0
+                                nx = -y;
+                                ny = 0;
+                                nz = 1;
+                            }
 
-                const target = new THREE.Vector3(x + nx, y + ny, z + nz);
-                item.mesh.lookAt(target);
+                            const target = new THREE.Vector3(x + nx, y + ny, z + nz);
+                            dummy.lookAt(target);
+                            dummy.scale.set(1, 1, 1); 
+                        } else {
+                            dummy.scale.set(0, 0, 0); 
+                        }
 
-                if (settings.showZZeroOnly) {
-                    item.mesh.visible = (item.k === 0);
-                } else {
-                    item.mesh.visible = true;
+                        dummy.updateMatrix();
+                        instancedPlanes.setMatrixAt(index, dummy.matrix);
+                        index++;
+                    }
                 }
-            });
+            }
+            instancedPlanes.instanceMatrix.needsUpdate = true;
         }
         
         updatePlanes();
 
-        // 6. Build the Parametric Legendrian Curve
-        class LegendrianCurve extends THREE.Curve {
-            constructor() {
-                super();
-            }
+        // 6. Build the Parametric Legendrian Curves
+        class SymmetricLegendrianCurve extends THREE.Curve {
+            constructor() { super(); }
             getPoint(t, optionalTarget = new THREE.Vector3()) {
                 const tScaled = t * Math.PI * 2;
-                
                 const x = 1.5 + 1.5 * Math.cos(tScaled + Math.PI);
                 const y = 1.5 * Math.sin(tScaled);
                 const z = (9/8) * tScaled - (9/8) * Math.sin(tScaled);
-
                 return optionalTarget.set(x, y, z);
             }
         }
 
-        const path = new LegendrianCurve();
-        const tubeGeometry = new THREE.TubeGeometry(path, 512, 0.04, 32, false);
+        class DarbouxLegendrianCurve extends THREE.Curve {
+            constructor() { super(); }
+            getPoint(t, optionalTarget = new THREE.Vector3()) {
+                // Scale to 4*PI to get two full periods of the curve
+                const tScaled = t * Math.PI * 4; 
+                
+                const x = Math.sin(tScaled);
+                const y = Math.cos(tScaled) - 1.0;
+                const z = (tScaled / 2.0) + (0.25 * Math.sin(2.0 * tScaled)) - Math.sin(tScaled);
+                
+                return optionalTarget.set(x, y, z);
+            }
+        }
+
+        const symmetricPath = new SymmetricLegendrianCurve();
+        const darbouxPath = new DarbouxLegendrianCurve();
+        
+        let activePath = symmetricPath; // Default path
         
         const tubeMaterial = new THREE.MeshPhysicalMaterial({ 
             color: 0x000000,
@@ -198,13 +216,24 @@
             reflectivity: 1.0
         }); 
         
-        const curveMesh = new THREE.Mesh(tubeGeometry, tubeMaterial);
-        
+        const curveMesh = new THREE.Mesh(new THREE.TubeGeometry(activePath, 512, 0.04, 32, false), tubeMaterial);
         curveMesh.visible = settings.showCurve;
         scene.add(curveMesh);
 
         // 7. Setup GUI Menu
         const gui = new GUI({ title: 'Contact Structure' });
+
+        gui.add(settings, 'contactForm', ['Symmetric', 'Darboux'])
+           .name('Contact Form')
+           .onChange((value) => {
+               // Update planes visual
+               updatePlanes();
+               
+               // Swap active curve and rebuild geometry
+               activePath = value === 'Symmetric' ? symmetricPath : darbouxPath;
+               curveMesh.geometry.dispose(); // Free up memory
+               curveMesh.geometry = new THREE.TubeGeometry(activePath, 512, 0.04, 32, false);
+           });
         
         const planesController = gui.add(settings, 'showPlanes')
            .name('Show Planes')
@@ -220,9 +249,16 @@
         gui.add(settings, 'flyAlongCurve').name('✈️ Fly Along Curve');
 
         // --- Custom Footer Injection ---
+        const footerStyle = document.createElement('style');
+        footerStyle.innerHTML = `
+            .gui-footer-text a { color: #8ec0ff; text-decoration: none; }
+            .gui-footer-text a:hover { text-decoration: underline; color: #fff; }
+            .gui-footer-text img { vertical-align: middle; }
+        `;
+        document.head.appendChild(footerStyle);
+
         const footerContainer = document.createElement('div');
-        
-        // Style container to fit nicely in GUI
+        footerContainer.className = 'gui-footer-text';
         Object.assign(footerContainer.style, {
             padding: '12px 10px',
             fontSize: '11px',
@@ -233,21 +269,11 @@
             fontFamily: 'sans-serif'
         });
 
-        // Insert provided HTML. Added <style> block to ensure links are visible on dark theme.
         footerContainer.innerHTML = `
-            <style>
-                .gui-footer-text a { color: #8ec0ff; text-decoration: none; }
-                .gui-footer-text a:hover { text-decoration: underline; color: #fff; }
-                .gui-footer-text img { vertical-align: middle; }
-            </style>
-            <div class="gui-footer-text">
-                <a href="https://szimmerman10.github.io/szimmerman10/heisenberg.html">Interactive Heisenberg Group</a> © 2026 by <a href="https://www.zimmermanmath.com">Scott Zimmerman</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/sa.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">. Created using <a href="https://gemini.google.com/">Google Gemini.</a>
-            </div>
+            <a href="https://szimmerman10.github.io/szimmerman10/heisenberg.html">Interactive Heisenberg Group</a> © 2026 by <a href="https://www.zimmermanmath.com">Scott Zimmerman</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/sa.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">. Created using <a href="https://gemini.google.com/">Google Gemini.</a>
         `;
         
-        // Append to the main GUI container
         gui.domElement.appendChild(footerContainer);
-
 
         // Flight Animation Variables
         let flightState = 0; 
@@ -255,8 +281,6 @@
         
         const transitionDuration = 1000; 
         const flightDuration = 10000;    
-        
-        // FIXED: Increased offset so camera doesn't intersect the tube
         const FLIGHT_OFFSET = 0.2; 
 
         const startTransPos = new THREE.Vector3();
@@ -282,8 +306,9 @@
             startTransPos.copy(camera.position);
             startTransTarget.copy(controls.target);
 
-            const startPoint = path.getPoint(0);
-            const startTangent = path.getTangent(0);
+            // Use the currently active path
+            const startPoint = activePath.getPoint(0);
+            const startTangent = activePath.getTangent(0);
 
             endTransPos.copy(startPoint);
             endTransPos.z += FLIGHT_OFFSET; 
@@ -323,8 +348,8 @@
 
                     startTransPos.copy(camera.position);
                     
-                    const lastPoint = path.getPoint(1.0);
-                    const lastTangent = path.getTangent(1.0);
+                    const lastPoint = activePath.getPoint(1.0);
+                    const lastTangent = activePath.getTangent(1.0);
                     startTransTarget.copy(lastPoint).add(lastTangent);
                     startTransTarget.z += FLIGHT_OFFSET;
 
@@ -332,8 +357,8 @@
                     endTransTarget.copy(defaultTarget);
 
                 } else {
-                    const point = path.getPoint(t);
-                    const tangent = path.getTangent(t);
+                    const point = activePath.getPoint(t);
+                    const tangent = activePath.getTangent(t);
 
                     camera.position.copy(point);
                     camera.position.z += FLIGHT_OFFSET; 
@@ -382,4 +407,3 @@
     </script>
 </body>
 </html>
-
