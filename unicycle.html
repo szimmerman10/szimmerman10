@@ -37,7 +37,7 @@
 
         button {
             width: 60px; height: 60px; background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(255, 255, 255, 0.4);
-            color: #333; font-size: 20px; border-radius: 16px; cursor: pointer; touch-action: manipulation;
+            color: #333; font-size: 20px; border-radius: 16px; cursor: pointer; touch-action: none;
             transition: all 0.15s cubic-bezier(0.25, 0.8, 0.25, 1); 
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             backdrop-filter: blur(4px);
@@ -75,7 +75,7 @@
     <div id="loading">Loading Models...</div>
 
     <div id="controls-area">
-        <button id="btn-path">Create Path</button>
+        <button id="btn-path">Move to Target</button>
         <div class="control-grid">
             <button id="btn-fwd">↑W</button>
             <button id="btn-s-left">←A</button>
@@ -94,12 +94,9 @@
         
         // --- Configuration ---
         const FLOOR_SIZE = 200;
-        const WALL_Z_POS = 10; 
         const MOVE_SPEED = 0.15; 
         const ROT_SPEED = 0.05;
-        const DOOR_WIDTH = 5;
-        const CHAR_RADIUS = 0.5; 
-        const TARGET_Z = WALL_Z_POS; 
+        const TARGET_Z = 10; 
 
         // --- Globals ---
         let scene, camera, renderer, controls, clock;
@@ -111,14 +108,16 @@
         let activeAction = null;
         let unicycleGroup = null; 
         
-        const telemetry = { x: 0.00, y: 0.00, angle: 0.00 };
+        const telemetry = { posX: 0.00, posZ: 0.00, angle: 0.00 };
 
         const moveState = {
             forward: false, backward: false, rotLeft: false, rotRight: false, strafeLeft: false, strafeRight: false
         };
 
         const autoPilot = {
-            active: false, points: [], currIndex: 0, targetPos: new THREE.Vector3(0, 0, TARGET_Z), 
+            active: false, tracedPoints: [], currIndex: 0, 
+            targetPos: new THREE.Vector3(0, 0, TARGET_Z),
+            progress: 0, curveData: null
         };
 
         const MODELS = {
@@ -135,7 +134,8 @@
             clock = new THREE.Clock();
 
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 8, -16);
+            
+            camera.position.set(-12, 12, -14);
             
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -150,7 +150,8 @@
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.maxPolarAngle = Math.PI / 2.05; 
-            controls.target.set(0, 1.5, 0); 
+            
+            controls.target.set(-3.5, 1.0, 3.5); 
 
             createSkySphere();
 
@@ -271,33 +272,16 @@
             floor.receiveShadow = true;
             scene.add(floor);
 
-            const woodTex = createNoiseTexture(128, 512, 0x5c4033, 'wood');
-            const woodMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.8, metalness: 0.0 });
-
-            function createFenceSegment(xStart, width) {
-                const group = new THREE.Group();
-                const plankCount = Math.floor(width / 0.6);
-                for(let i=0; i<plankCount; i++) {
-                    const h = 7 + Math.random();
-                    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.5, h, 0.2), woodMat);
-                    plank.position.set(xStart + i*0.6, h/2, WALL_Z_POS);
-                    plank.castShadow = true; plank.receiveShadow = true;
-                    plank.rotation.z = (Math.random() - 0.5) * 0.1;
-                    plank.rotation.y = (Math.random() - 0.5) * 0.1;
-                    group.add(plank);
-                }
-                scene.add(group);
-            }
-
-            const leftWidth = (FLOOR_SIZE/2) - (DOOR_WIDTH/2);
-            createFenceSegment(-(DOOR_WIDTH/2 + leftWidth) + 10, leftWidth - 10); 
-            createFenceSegment((DOOR_WIDTH/2), leftWidth - 10);
-
             const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
             const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.4, 32), ringMat);
             targetRing.rotation.x = -Math.PI/2;
-            targetRing.position.set(0, 0.05, TARGET_Z);
+            targetRing.position.set(0, 0.05, 0); 
             scene.add(targetRing);
+
+            const arrowDir = new THREE.Vector3(0, 0, 1);
+            const arrowOrigin = new THREE.Vector3(0, 0.06, 0);
+            const targetArrow = new THREE.ArrowHelper(arrowDir, arrowOrigin, 1.5, 0xffffff, 0.3, 0.2);
+            scene.add(targetArrow);
 
             createFlowers();
         }
@@ -466,13 +450,11 @@
         function createHeadAccessories() {
             const group = new THREE.Group();
 
-            // Materials
             const hatMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
             const frameMat = new THREE.MeshStandardMaterial({ color: 0x050505, metalness: 0.8, roughness: 0.2 });
             const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x000000, metalness: 0.8, roughness: 0.1, transparent: true, opacity: 0.95 });
             const beardMat = new THREE.MeshStandardMaterial({ color: 0x331a00, roughness: 1.0 });
 
-            // --- Hat (Pork Pie Style) ---
             const hatGroup = new THREE.Group();
             const hatBrimGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.015, 32); 
             const hatBrim = new THREE.Mesh(hatBrimGeo, hatMat);
@@ -484,14 +466,10 @@
             hatTop.position.y = 0.07;
             hatGroup.add(hatTop);
             
-            // Final position relative to head bone
-            // NOTE: Mixamo head bone usually points UP (+Y). Z is forward.
-            // These numbers position the hat on top of the head.
             hatGroup.position.set(0, 0, -0.05);
             hatGroup.rotation.x = -0.1; 
             group.add(hatGroup);
 
-            // --- Glasses (Dark Sunglasses) ---
             const glassesGroup = new THREE.Group();
             const frameGeo = new THREE.BoxGeometry(0.06, 0.045, 0.005);
             const lensGeo = new THREE.PlaneGeometry(0.05, 0.035);
@@ -522,11 +500,9 @@
             rightArm.position.set(0.085, 0.01, -0.09);
             glassesGroup.add(rightArm);
 
-            // Positioned over eyes
             glassesGroup.position.set(0, -0.12, 0.2);
             group.add(glassesGroup);
 
-            // --- Beard (Goatee) ---
             const beardGroup = new THREE.Group();
             const chinBeard = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.12, 4), beardMat);
             chinBeard.rotation.x = -Math.PI/4;
@@ -536,15 +512,12 @@
             
             const mustache = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.03, 0.02), beardMat);
             mustache.position.set(0, 0.04, 0.18);
-            // Slight translation to curve it
             mustache.geometry.translate(0, -0.01, 0);
             beardGroup.add(mustache);
 
-		beardGroup.position.set(0, -0.26, 0.03);
+            beardGroup.position.set(0, -0.26, 0.03);
 
             group.add(beardGroup);
-            
-            // Adjusted Scale: 1.0 (Since model is 1.7x, this results in ~1.7 world size)
             group.scale.setScalar(60.0); 
             return group;
         }
@@ -579,10 +552,8 @@
                 let headBone = null;
 
                 model.traverse(o => { 
-                    // Robust check for Head bone
                     if (o.isBone && o.name.toLowerCase().includes('head')) {
                         headBone = o;
-                        console.log("Head bone found: " + o.name);
                     }
                     if(o.isMesh) { 
                         o.castShadow = true; 
@@ -592,10 +563,7 @@
                         else o.material = matBody;
                     } 
                 });
-
-
                 
-                // 3. Setup Container
                 const container = new THREE.Group();
                 container.position.set(-7, 0, 7);
                 container.rotation.y = Math.PI; 
@@ -615,14 +583,12 @@
                     unicycleGroup = uni.userData.wheel; 
                     container.add(uni);
 
-                // --- ATTACH HEAD ACCESSORIES ---
-                const accessories = createHeadAccessories();
+                    const accessories = createHeadAccessories();
                     headBone.add(accessories);
 
                     model.position.y = 0.2; 
                     container.add(model);
 
-                    // Unicycle pose logic
                     let lUpLeg, rUpLeg, lLowLeg, rLowLeg, lArm, rArm;
                     model.traverse(o => {
                         if (o.isBone) {
@@ -647,9 +613,6 @@
                     document.getElementById('btn-s-right').style.display = 'none';
                 }
 
-                const collider = new THREE.Mesh(new THREE.CapsuleGeometry(CHAR_RADIUS, 1.0, 4, 8), new THREE.MeshBasicMaterial({ visible: false }));
-                collider.position.y = 0.85; container.add(collider);
-
                 addArrowsToCharacter(container); 
 
                 activeCharacter = container;
@@ -662,95 +625,142 @@
             });
         }
 
-        // --- PATHFINDING & CONTROLS ---
+        // --- PATHFINDING & CONTROLS (Pose-to-Pose Kinematic Feedback) ---
 
         function stopAutoPilot() {
             autoPilot.active = false;
-            if (pathMesh) { scene.remove(pathMesh); pathMesh = null; }
         }
 
-        function calculateAndDrawPath() {
+        function normalizeAngle(angle) {
+            while (angle > Math.PI) angle -= Math.PI * 2;
+            while (angle < -Math.PI) angle += Math.PI * 2;
+            return angle;
+        }
+
+        function startAutoPilot() {
             if (!activeCharacter) return;
-            stopAutoPilot(); 
-            const startPos = activeCharacter.position.clone();
-            const endPos = autoPilot.targetPos.clone();
-            if (currentScenario === 'Walker') calculateWalkerPath(startPos, endPos);
-            else calculateUnicyclePath(startPos, endPos);
-        }
-
-        function calculateUnicyclePath(startPos, endPos) {
-            const dist = startPos.distanceTo(endPos);
-            const scale = dist * 0.4; 
-            const forward = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y);
-            const safeWallZ = WALL_Z_POS - CHAR_RADIUS - 0.2; 
-            let p1 = startPos.clone().add(forward.clone().multiplyScalar(scale));
-            let p2 = endPos.clone().sub(new THREE.Vector3(0,0,1).multiplyScalar(scale)); 
-            if (p1.z > safeWallZ) p1.z = safeWallZ;
-            if (p2.z > safeWallZ) p2.z = safeWallZ;
-            const curve = new THREE.CubicBezierCurve3(startPos, p1, p2, endPos);
-            const points = curve.getPoints(100);
-            points.forEach(p => { 
-                if (p.z > WALL_Z_POS - 0.5 && Math.abs(p.x) > DOOR_WIDTH/2) p.z = WALL_Z_POS - 0.5; 
-            });
-            drawPath(points);
-        }
-
-        function calculateWalkerPath(startPos, endPos) {
-            const points = [startPos];
-            const wallZ = WALL_Z_POS - CHAR_RADIUS;
-            const doorHalf = (DOOR_WIDTH/2) - CHAR_RADIUS;
-            let t = (wallZ - startPos.z) / (endPos.z - startPos.z);
-            let intersectX = startPos.x + t * (endPos.x - startPos.x);
-            if (t > 0 && t < 1 && Math.abs(intersectX) > doorHalf) {
-                points.push(new THREE.Vector3(0, startPos.y, wallZ));
+            
+            if (pathMesh) {
+                scene.remove(pathMesh);
+                pathMesh.geometry.dispose();
+                pathMesh.material.dispose();
+                pathMesh = null;
             }
-            points.push(endPos);
-            const densePoints = [];
-            for(let i=0; i<points.length-1; i++) {
-                const p1 = points[i]; const p2 = points[i+1];
-                const dist = p1.distanceTo(p2);
-                const segments = Math.max(20, Math.floor(dist * 5));
-                for(let j=0; j<=segments; j++) densePoints.push(new THREE.Vector3().lerpVectors(p1, p2, j/segments));
-            }
-            drawPath(densePoints);
-        }
 
-        function drawPath(points) {
-            const geo = new THREE.BufferGeometry().setFromPoints(points);
+            autoPilot.tracedPoints = [activeCharacter.position.clone()];
+            
+            const geo = new THREE.BufferGeometry().setFromPoints(autoPilot.tracedPoints);
             pathMesh = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 3 }));
-            pathMesh.position.y = 0.1; scene.add(pathMesh);
-            autoPilot.points = points; autoPilot.currIndex = 0; autoPilot.active = true;
+            pathMesh.position.y = 0.1; 
+            scene.add(pathMesh);
+
+            autoPilot.targetPos.set(0, 0, 0);
+            autoPilot.active = true;
         }
 
         function updateAutoPilot() {
             if (!autoPilot.active || !activeCharacter) return;
-            if (autoPilot.currIndex >= autoPilot.points.length - 1) {
-                if (currentScenario === 'Walker') {
-                    const targetRot = 0; 
-                    let diff = targetRot - activeCharacter.rotation.y;
-                    while (diff > Math.PI) diff -= Math.PI * 2;
-                    while (diff < -Math.PI) diff += Math.PI * 2;
-                    if (Math.abs(diff) > 0.05) {
-                        activeCharacter.rotation.y += diff * 0.1;
-                        return; 
-                    }
-                }
-                stopAutoPilot(); animateCharacter(false, true); return;
-            }
             const char = activeCharacter;
-            const targetPoint = autoPilot.points[autoPilot.currIndex + 1];
-            const dir = targetPoint.clone().sub(char.position);
-            const step = MOVE_SPEED; 
-            if (dir.length() < step) { char.position.copy(targetPoint); autoPilot.currIndex++; } 
-            else { char.position.add(dir.normalize().multiplyScalar(step)); }
 
-            const angle = Math.atan2(dir.x, dir.z);
-            let diff = angle - char.rotation.y;
-            while (diff > Math.PI) diff -= Math.PI * 2;
-            while (diff < -Math.PI) diff += Math.PI * 2;
-            char.rotation.y += diff * 0.1;
+            let dx = autoPilot.targetPos.x - char.position.x;
+            let dz = autoPilot.targetPos.z - char.position.z;
+            let rho = Math.sqrt(dx * dx + dz * dz); 
 
-            animateCharacter(true, true); 
+            const targetRot = 0; 
+
+            if (currentScenario === 'Unicyclist') {
+                if (rho < 0.05) {
+                    char.position.copy(autoPilot.targetPos);
+                    char.rotation.y = targetRot;
+                    stopAutoPilot();
+                    animateCharacter(false, true);
+                    return;
+                }
+
+                let gamma = Math.atan2(dx, dz); 
+                let alpha = normalizeAngle(gamma - char.rotation.y); 
+                let beta = normalizeAngle(targetRot - gamma); 
+
+                let direction = 1.0;
+                if (Math.abs(alpha) > Math.PI / 2) {
+                    direction = -1.0;
+                    alpha = normalizeAngle(alpha - Math.PI); 
+                    beta = normalizeAngle(beta + Math.PI);  
+                }
+
+                let k_rho = 1.5; 
+                let k_alpha = 4.0;
+                let k_beta = -1.5;
+
+                let v_des = k_rho * rho * direction;
+                let w_des = k_alpha * alpha + k_beta * beta;
+
+                let scale = 1.0;
+                if (Math.abs(v_des) > MOVE_SPEED) scale = MOVE_SPEED / Math.abs(v_des);
+                if (Math.abs(w_des * scale) > ROT_SPEED * 1.5) scale = (ROT_SPEED * 1.5) / Math.abs(w_des);
+
+                let v = v_des * scale;
+                let w = w_des * scale;
+
+                char.rotation.y = normalizeAngle(char.rotation.y + w);
+                char.position.x += v * Math.sin(char.rotation.y);
+                char.position.z += v * Math.cos(char.rotation.y);
+
+                animateCharacter(true, v >= 0);
+
+            } else {
+                // --- OPTIMIZED HOLONOMIC WALKER LOGIC ---
+                let angleDiff = normalizeAngle(targetRot - char.rotation.y);
+
+                if (rho < 0.05 && Math.abs(angleDiff) < 0.05) {
+                    char.position.copy(autoPilot.targetPos);
+                    char.rotation.y = targetRot;
+                    stopAutoPilot();
+                    animateCharacter(false, true);
+                    return;
+                }
+
+                // Treat the exact distance and angle as the raw desired 1-frame trajectory
+                let v_des_x = dx;
+                let v_des_z = dz;
+                let w_des = angleDiff;
+
+                let v_mag = Math.sqrt(v_des_x * v_des_x + v_des_z * v_des_z);
+                
+                let scale = 1.0;
+                
+                // Cap translation speed, but mathematically prevent overshooting the position
+                if (v_mag > MOVE_SPEED) {
+                    scale = Math.min(scale, MOVE_SPEED / v_mag);
+                }
+                
+                // Cap rotation speed, but mathematically prevent overshooting the target angle
+                if (Math.abs(w_des) > ROT_SPEED) {
+                    scale = Math.min(scale, ROT_SPEED / Math.abs(w_des));
+                }
+
+                let v_x = v_des_x * scale;
+                let v_z = v_des_z * scale;
+                let w = w_des * scale;
+
+                char.position.x += v_x;
+                char.position.z += v_z;
+                char.rotation.y = normalizeAngle(char.rotation.y + w);
+
+                let isMoving = (v_mag > 0.01) || (Math.abs(w_des) > 0.01);
+                
+                let forwardVelocityComponent = (v_x * Math.sin(char.rotation.y) + v_z * Math.cos(char.rotation.y));
+                let isForward = forwardVelocityComponent >= -0.01; 
+
+                animateCharacter(isMoving, isForward);
+            }
+
+            // Trace the Path dynamically for both characters
+            const lastPoint = autoPilot.tracedPoints[autoPilot.tracedPoints.length - 1];
+            if (char.position.distanceTo(lastPoint) > 0.1) {
+                autoPilot.tracedPoints.push(char.position.clone());
+                pathMesh.geometry.setFromPoints(autoPilot.tracedPoints);
+            }
         }
 
         function animateCharacter(isMoving, isForward) {
@@ -775,27 +785,21 @@
         function setupGUI() {
             const gui = new GUI({ title: 'Settings' });
             
-            // --- UPDATED GUI BUTTON ---
             const params = { 
                 switchMode: () => {
-                    // Toggles between walker and unicyclist
                     const nextMode = currentScenario === 'Walker' ? 'unicyclist' : 'walker';
                     loadCharacter(nextMode); 
                 }
             };
             gui.add(params, 'switchMode').name('Switch Character');
-            // ---------------------------
 
             const folder = gui.addFolder('Telemetry');
-            folder.add(telemetry, 'y').name('Pos x (Left/Right)').listen().disable().decimals(2); 
-            folder.add(telemetry, 'x').name('Pos y (Fwd/Back)').listen().disable().decimals(2);
+            folder.add(telemetry, 'posX').name('Pos X').listen().disable().decimals(2); 
+            folder.add(telemetry, 'posZ').name('Pos Z').listen().disable().decimals(2);
             folder.add(telemetry, 'angle').name('Angle (Rad)').listen().disable().decimals(2);
             folder.open();
 
-            // --- Custom Footer Injection ---
             const footerContainer = document.createElement('div');
-            
-            // Style container to fit nicely in GUI
             Object.assign(footerContainer.style, {
                 padding: '12px 10px',
                 fontSize: '11px',
@@ -806,7 +810,6 @@
                 fontFamily: 'sans-serif'
             });
 
-            // Insert provided HTML. Added <style> block to ensure links are visible on dark theme.
             footerContainer.innerHTML = `
                 <style>
                     .gui-footer-text a { color: #8ec0ff; text-decoration: none; }
@@ -815,13 +818,11 @@
                 </style>
                 <div class="gui-footer-text">
                     <a href="https://szimmerman10.github.io/szimmerman10/unicycle.html">Unicycling With Heisenberg</a> © 2026 by <a href="https://www.zimmermanmath.com">Scott Zimmerman</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/sa.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">.
-		Created using <a href="https://gemini.google.com/">Google Gemini.</a>
+		            Created using <a href="https://gemini.google.com/">Google Gemini.</a>
                 </div>
             `;
             
-            // Append to the main GUI container
             gui.domElement.appendChild(footerContainer);
-            
             gui.domElement.id = 'gui-container';
         }
 
@@ -840,27 +841,36 @@
         }
 
         function setupHTMLButtons() {
-            document.getElementById('btn-path').onclick = calculateAndDrawPath;
+            document.getElementById('btn-path').onclick = startAutoPilot;
+            
             const bindBtn = (id, key) => {
                 const btn = document.getElementById(id);
-                btn.addEventListener('mousedown', (e) => { e.preventDefault(); stopAutoPilot(); moveState[key]=true; btn.classList.add('active'); });
-                window.addEventListener('mouseup', (e) => { e.preventDefault(); moveState[key]=false; btn.classList.remove('active'); });
-                btn.addEventListener('touchstart', (e) => { e.preventDefault(); stopAutoPilot(); moveState[key]=true; btn.classList.add('active'); }, {passive:false});
-                btn.addEventListener('touchend', (e) => { e.preventDefault(); moveState[key]=false; btn.classList.remove('active'); });
+                
+                btn.addEventListener('pointerdown', (e) => { 
+                    e.preventDefault(); 
+                    stopAutoPilot(); 
+                    moveState[key] = true; 
+                    btn.classList.add('active'); 
+                    btn.setPointerCapture(e.pointerId); 
+                });
+                
+                btn.addEventListener('pointerup', (e) => { 
+                    e.preventDefault(); 
+                    moveState[key] = false; 
+                    btn.classList.remove('active'); 
+                    btn.releasePointerCapture(e.pointerId);
+                });
+
+                btn.addEventListener('pointercancel', (e) => { 
+                    e.preventDefault(); 
+                    moveState[key] = false; 
+                    btn.classList.remove('active'); 
+                    btn.releasePointerCapture(e.pointerId);
+                });
             };
+            
             bindBtn('btn-fwd','forward'); bindBtn('btn-back','backward'); bindBtn('btn-left','rotLeft');
             bindBtn('btn-right','rotRight'); bindBtn('btn-s-left','strafeLeft'); bindBtn('btn-s-right','strafeRight');
-        }
-
-        function checkCollision(oldPos, newPos) {
-            const wallZ = WALL_Z_POS - CHAR_RADIUS; 
-            if (newPos.z > wallZ) {
-                if (Math.abs(newPos.x) > 100) return newPos; 
-                const doorSafeHalfWidth = (DOOR_WIDTH / 2) - CHAR_RADIUS;
-                if (Math.abs(newPos.x) < doorSafeHalfWidth) return newPos; 
-                return new THREE.Vector3(newPos.x, oldPos.y, wallZ);
-            }
-            return newPos;
         }
 
         function onWindowResize() {
@@ -879,7 +889,6 @@
                 updateAutoPilot();
             }
             else if (activeCharacter) {
-                // Movement
                 const arrows = activeCharacter.userData.arrows;
                 if (arrows) {
                     arrows.fwd.visible = moveState.forward; 
@@ -893,13 +902,12 @@
                 if (moveState.rotLeft) activeCharacter.rotation.y += ROT_SPEED;
                 if (moveState.rotRight) activeCharacter.rotation.y -= ROT_SPEED;
 
-                const currentPos = activeCharacter.position.clone();
-                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y);
-                const right = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y - Math.PI/2);
-                
                 let moveVec = new THREE.Vector3();
                 let isMoving = false;
                 let isForward = true;
+
+                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y);
+                const right = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), activeCharacter.rotation.y - Math.PI/2);
 
                 if (moveState.forward) { moveVec.add(forward); isMoving = true; }
                 if (moveState.backward) { moveVec.sub(forward); isMoving = true; isForward = false; }
@@ -912,18 +920,12 @@
 
                 if (moveVec.lengthSq() > 0) {
                     moveVec.normalize().multiplyScalar(MOVE_SPEED);
-                    const proposedPos = currentPos.clone().add(moveVec);
-                    activeCharacter.position.copy(checkCollision(currentPos, proposedPos));
+                    activeCharacter.position.add(moveVec);
                 }
 
-                // Telemetry
-                telemetry.x = TARGET_Z - activeCharacter.position.z; 
-                telemetry.y = 0 - activeCharacter.position.x; 
-
-                let rawRot = activeCharacter.rotation.y;
-                while(rawRot > Math.PI) rawRot -= Math.PI * 2;
-                while(rawRot < -Math.PI) rawRot += Math.PI * 2;
-                telemetry.angle = rawRot;
+                telemetry.posX = activeCharacter.position.x; 
+                telemetry.posZ = activeCharacter.position.z; 
+                telemetry.angle = normalizeAngle(activeCharacter.rotation.y);
             }
 
             controls.update();
