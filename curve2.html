@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sub-Riemannian Fractal Curves - Smooth Fast Camera</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #111;
+            color: #eee;
+        }
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(30, 30, 30, 0.95);
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            z-index: 10;
+            pointer-events: auto;
+            width: 330px;
+            border: 1px solid #444;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        h2 { margin: 0 0 10px 0; font-size: 1.1rem; color: #fff; }
+        .control-group { margin-bottom: 12px; display: flex; flex-direction: column; }
+        label { font-weight: bold; margin-bottom: 4px; font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center; }
+        select { padding: 6px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; font-size: 14px; width: 100%; box-sizing: border-box; }
+        input[type="range"] { padding: 0; margin-top: 4px; cursor: pointer; width: 100%; }
+        
+        input[type="number"] {
+            padding: 4px; border-radius: 4px; border: 1px solid #555; 
+            background: #222; color: #fff; font-size: 13px; 
+            font-family: monospace; width: 80px; text-align: right;
+        }
+        
+        .playback-controls { flex-direction: row; justify-content: space-between; gap: 8px; margin-top: 10px; }
+        .playback-controls button {
+            flex: 1; padding: 6px 0; background: #333; color: #eee; border: 1px solid #555; 
+            border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: background 0.2s;
+        }
+        .playback-controls button:hover { background: #4a4a4a; }
+        .playback-controls button:active { background: #222; }
+
+        .toggle-group { flex-direction: row; justify-content: flex-start; align-items: center; gap: 10px; margin-top: 10px; }
+        .toggle-group input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+        .toggle-group label { margin-bottom: 0; cursor: pointer; }
+
+        .legend { margin-top: 15px; font-size: 12px; }
+        .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+        .color-box { width: 12px; height: 12px; margin-right: 8px; border-radius: 2px; }
+        .color-alpha { background: #3b82f6; } 
+        .color-beta { background: #ef4444; } 
+        .stats { color: #aaa; font-size: 12px; margin-top: 12px; padding-top: 8px; border-top: 1px solid #444; display: flex; justify-content: space-between;}
+        
+        /* New Footer Styles */
+        #footer-container {
+            margin-top: 15px;
+            padding-top: 12px;
+            border-top: 1px solid #444;
+            font-size: 10px;
+            color: #888;
+            line-height: 1.4;
+            text-align: left;
+        }
+        #footer-container a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        #footer-container a:hover {
+            text-decoration: underline;
+        }
+        #footer-container img {
+            vertical-align: middle;
+            filter: invert(0.7); /* Softens the CC icons for dark mode */
+        }
+
+        #loading-overlay {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #111; color: #fff; z-index: 100; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; font-family: monospace; font-size: 18px;
+        }
+
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <div>Precomputing Fractal Geometries...</div>
+        <div style="font-size: 12px; color: #888; margin-top: 8px;">Crunching continuous math domains to ensure zero delay.</div>
+    </div>
+
+    <div id="ui-container" style="display: none;">
+        <h2>Ultra-Precision Fractals</h2>
+        <div class="control-group">
+            <label for="curveSelect">Curve Selection:</label>
+            <select id="curveSelect">
+                <option value="gamma1" selected>γ₁ (Base X₁ Curve)</option>
+                <option value="alpha">α⁺ (Macro X₁, Targets x₅)</option>
+                <option value="beta">β⁺ (Macro X₂, Targets x₄)</option>
+                <option value="gamma2">γ₂ (1st Iteration: 19 Segments)</option>
+                <option value="gamma3">γ₃ (2nd Iteration: 361 Segments)</option>
+                <option value="gamma4">γ₄ (3rd Iteration: 6,859 Segments)</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="projection">Z-Axis Projection:</label>
+            <select id="projection">
+                <option value="x4">(x₁, x₂, x₄)</option>
+                <option value="x5" selected>(x₁, x₂, x₅)</option>
+            </select>
+        </div>
+        
+        <hr style="border: 0; border-top: 1px solid #444; margin: 12px 0;">
+
+        <div class="control-group">
+            <label for="timeSlider">
+                <span>Parameter (t):</span> 
+                <input type="number" id="timeInput" min="0" max="1" step="0.0001" value="0.0000">
+            </label>
+            <input type="range" id="timeSlider" min="0" max="1" step="0.0001" value="0">
+        </div>
+
+        <div class="control-group">
+            <label for="speedInput">
+                <span>Playback Speed (x):</span> 
+                <input type="number" id="speedInput" min="0.01" step="0.01" value="1.0">
+            </label>
+        </div>
+
+        <div class="control-group playback-controls">
+            <button id="btnPerturbations">See perturbations</button>
+            <button id="btnDefaultSpeed">Default speed</button>
+        </div>
+
+        <div class="control-group playback-controls">
+            <button id="btnPlay">Play</button>
+            <button id="btnPause">Pause</button>
+            <button id="btnReset">Reset</button>
+        </div>
+
+        <div class="control-group toggle-group">
+            <input type="checkbox" id="followCamToggle">
+            <label for="followCamToggle">Follow Camera (Fast Smooth)</label>
+        </div>
+        
+        <div class="legend">
+            <div class="legend-item"><div class="color-box color-alpha"></div> Built using α replacements</div>
+            <div class="legend-item"><div class="color-box color-beta"></div> Built using β replacements</div>
+        </div>
+        
+        <div class="stats">
+            <span id="stats-segments">Segments: 0</span>
+            <span id="stats-vertices">Vertices: 0</span>
+        </div>
+
+        <div id="footer-container">
+            <a href="https://szimmerman10.github.io/szimmerman10/curves2.html">Purely C^1_H 1-Unrectifiable Lipschitz Curve</a> © 2026 by <a href="https://www.zimmermanmath.com">Scott Zimmerman</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/sa.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">. Created using <a href="https://gemini.google.com/">Google Gemini.</a>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // 1. Math Setup & Precomputation Engine
+        const seq_p4 = [
+            { V: 'X2', sign: -1 }, { V: 'X1', sign: 1 }, { V: 'X2', sign: 1 }, { V: 'X1', sign: -1 },
+            { V: 'X2', sign: -1 }, { V: 'X1', sign: -1 }, { V: 'X2', sign: 1 }, { V: 'X1', sign: 1 }
+        ];
+
+        const seq_p5 = [
+            { V: 'X2', sign: 1 }, { V: 'X1', sign: -1 }, { V: 'X2', sign: -1 }, { V: 'X1', sign: 1 },
+            { V: 'X2', sign: -1 }, { V: 'X1', sign: -1 }, { V: 'X2', sign: 1 }, { V: 'X1', sign: 1 }
+        ];
+
+        function generateFractalInstructions(n, baseV = 'X1') {
+            let segments = [{ 
+                V: baseV, sign: 1, lambda: 1, duration: 1.0, 
+                parentType: baseV === 'X1' ? 'alpha' : 'beta' 
+            }];
+            
+            for (let step = 1; step < n; step++) {
+                let nextSegments = [];
+                for (let seg of segments) {
+                    let type = (seg.V === 'X1') ? 'alpha' : 'beta';
+                    let macroSign = seg.sign;
+                    
+                    let dt_macro = seg.duration * (5 / 17);
+                    let dt_micro = seg.duration * (1 / 136); 
+                    
+                    let L_macro = seg.lambda / 3;     
+                    let L_micro = seg.lambda / 120;   
+                    
+                    const pushMacro = () => { nextSegments.push({ V: seg.V, sign: macroSign, lambda: L_macro, duration: dt_macro, parentType: type }); };
+                    
+                    pushMacro(); 
+                    let seq = type === 'alpha' ? seq_p5 : seq_p4;
+                    let microScaleSign = type === 'beta' ? -1 : 1;
+                    
+                    for (let i = 0; i < 8; i++) {
+                        let stepV = seq[i].V;
+                        let stepSign = seq[i].sign * microScaleSign;
+                        if (macroSign === -1 && stepV === seg.V) stepSign = -stepSign;
+                        nextSegments.push({ V: stepV, sign: stepSign, lambda: L_micro, duration: dt_micro, parentType: type });
+                    }
+                    
+                    pushMacro(); 
+                    for (let i = 7; i >= 0; i--) {
+                        let stepV = seq[i].V;
+                        let stepSign = -seq[i].sign * microScaleSign;
+                        if (macroSign === -1 && stepV === seg.V) stepSign = -stepSign;
+                        nextSegments.push({ V: stepV, sign: stepSign, lambda: L_micro, duration: dt_micro, parentType: type });
+                    }
+                    pushMacro(); 
+                }
+                segments = nextSegments;
+            }
+            
+            return segments.map(seg => ({
+                V: seg.V,
+                c: (seg.sign * seg.lambda) / seg.duration,
+                duration: seg.duration,
+                parentType: seg.parentType 
+            }));
+        }
+
+        const precomputedData = {};
+
+        function buildCurveData(curveVal, projKey) {
+            let currentInstructions = [];
+            if (curveVal === 'gamma1') currentInstructions = generateFractalInstructions(1, 'X1');
+            else if (curveVal === 'alpha') currentInstructions = generateFractalInstructions(2, 'X1');
+            else if (curveVal === 'beta') currentInstructions = generateFractalInstructions(2, 'X2');
+            else if (curveVal === 'gamma2') currentInstructions = generateFractalInstructions(2, 'X1');
+            else if (curveVal === 'gamma3') currentInstructions = generateFractalInstructions(3, 'X1');
+            else if (curveVal === 'gamma4') currentInstructions = generateFractalInstructions(4, 'X1');
+
+            let instructionCache = [];
+            let state = [0, 0, 0, 0, 0];
+            let t = 0;
+            
+            for (let seg of currentInstructions) {
+                instructionCache.push({ startTime: t, startState: [...state] });
+                let [x1, x2, x3, x4, x5] = state;
+                let c = seg.c;
+                let tau = seg.duration;
+                
+                if (seg.V === 'X1') {
+                    state = [x1 + c * tau, x2, x3, x4, x5];
+                } else {
+                    state = [
+                        x1, x2 + c * tau, x3 - c * x1 * tau, x4 + 0.5 * c * x1 * x1 * tau,
+                        x5 + c * x1 * x2 * tau + 0.5 * c * c * x1 * tau * tau
+                    ];
+                }
+                t += tau;
+            }
+            instructionCache.push({ startTime: 1.0, startState: [...state] });
+
+            const mathSegments = [];
+            for (let i = 0; i < currentInstructions.length; i++) {
+                mathSegments.push({
+                    V: currentInstructions[i].V,
+                    c: currentInstructions[i].c,
+                    startTime: instructionCache[i].startTime,
+                    endTime: instructionCache[i+1].startTime,
+                    startState: instructionCache[i].startState
+                });
+            }
+
+            const zIdx = projKey === 'x4' ? 3 : 4;
+            let maxX = 0, maxY = 0, maxZ = 0;
+            
+            for (let i = 0; i < instructionCache.length; i++) {
+                let st = instructionCache[i].startState;
+                if (Math.abs(st[0]) > maxX) maxX = Math.abs(st[0]);
+                if (Math.abs(st[1]) > maxY) maxY = Math.abs(st[1]);
+                if (Math.abs(st[zIdx]) > maxZ) maxZ = Math.abs(st[zIdx]);
+            }
+
+            let multX = maxX > 1e-12 ? 1.0 / maxX : 1.0;
+            let multY = maxY > 1e-12 ? 1.0 / maxY : 1.0;
+            let multZ = maxZ > 1e-12 ? 1.0 / maxZ : 1.0;
+            
+            if ((curveVal === 'alpha' || curveVal.includes('gamma') && curveVal !== 'gamma1') && projKey === 'x5') {
+                multZ *= 2.0;
+            }
+
+            const targetVertices = 400000; 
+            const samplesPerSeg = Math.max(2, Math.floor(targetVertices / currentInstructions.length));
+            const totalVertices = currentInstructions.length * samplesPerSeg + 1;
+
+            const positions = new Float32Array(totalVertices * 3);
+            const colors = new Float32Array(totalVertices * 3);
+
+            let vIdx = 0;
+            for (let i = 0; i < currentInstructions.length; i++) {
+                const seg = currentInstructions[i];
+                const baseState = instructionCache[i].startState;
+                
+                let r = 0.23, g = 0.51, b = 0.96; 
+                if (seg.parentType === 'beta') {
+                    r = 0.93; g = 0.26; b = 0.26; 
+                }
+
+                for (let s = 0; s < samplesPerSeg; s++) {
+                    let tau = seg.duration * (s / samplesPerSeg);
+                    let [x1, x2, x3, x4, x5] = baseState;
+                    let c = seg.c;
+                    
+                    let px, py, pz;
+                    if (seg.V === 'X1') {
+                        px = x1 + c * tau; py = x2; pz = zIdx === 3 ? x4 : x5;
+                    } else {
+                        px = x1; py = x2 + c * tau;
+                        pz = zIdx === 3 
+                             ? (x4 + 0.5 * c * x1 * x1 * tau) 
+                             : (x5 + c * x1 * x2 * tau + 0.5 * c * c * x1 * tau * tau);
+                    }
+                    
+                    positions[vIdx * 3] = px * multX;
+                    positions[vIdx * 3 + 1] = py * multY;
+                    positions[vIdx * 3 + 2] = pz * multZ;
+                    
+                    colors[vIdx * 3] = r;
+                    colors[vIdx * 3 + 1] = g;
+                    colors[vIdx * 3 + 2] = b;
+                    vIdx++;
+                }
+            }
+            
+            const term = instructionCache[instructionCache.length - 1].startState;
+            positions[vIdx * 3] = term[0] * multX;
+            positions[vIdx * 3 + 1] = term[1] * multY;
+            positions[vIdx * 3 + 2] = term[zIdx] * multZ;
+            colors[vIdx * 3] = colors[(vIdx - 1) * 3];
+            colors[vIdx * 3 + 1] = colors[(vIdx - 1) * 3 + 1];
+            colors[vIdx * 3 + 2] = colors[(vIdx - 1) * 3 + 2];
+
+            return {
+                positions, colors, totalVertices, 
+                segmentsCount: currentInstructions.length,
+                mathSegments, multX, multY, multZ, zIdx
+            };
+        }
+
+        setTimeout(() => {
+            const curves = ['gamma1', 'alpha', 'beta', 'gamma2', 'gamma3', 'gamma4'];
+            const projs = ['x4', 'x5'];
+            curves.forEach(c => {
+                projs.forEach(p => {
+                    precomputedData[`${c}_${p}`] = buildCurveData(c, p);
+                });
+            });
+            
+            document.getElementById('loading-overlay').style.display = 'none';
+            document.getElementById('ui-container').style.display = 'block';
+            
+            initThree();
+        }, 100);
+
+        // 2. Three.js Engine Setup
+        let scene, camera, renderer, controls;
+        let visualGroup;
+        let tracePoint;
+        let activeData = null;
+        
+        // Playback & Camera State
+        let animationTime = 0; // t in [0, 1]
+        let isPlaying = true;
+        let currentCamLookAt = new THREE.Vector3(); 
+
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.000001, 100);
+            camera.up.set(0, 0, 1);
+            camera.position.set(2.5, 2.5, 2.0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.minDistance = 0.0001; 
+            controls.target.set(0.5, 0.5, 0);
+
+            visualGroup = new THREE.Group();
+            scene.add(visualGroup);
+
+            const sphereGeo = new THREE.SphereGeometry(0.004, 16, 16);
+            const sphereMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            tracePoint = new THREE.Mesh(sphereGeo, sphereMat);
+            scene.add(tracePoint);
+
+            // UI Listeners
+            document.getElementById('curveSelect').addEventListener('change', updateGeometry);
+            document.getElementById('projection').addEventListener('change', updateGeometry);
+            
+            // Preset Listeners
+            document.getElementById('btnPerturbations').addEventListener('click', () => {
+                animationTime = 0.294;
+                document.getElementById('speedInput').value = 0.005;
+                updateSliderUI();
+                isPlaying = true; // Auto-play to watch the perturbations
+            });
+
+            document.getElementById('btnDefaultSpeed').addEventListener('click', () => {
+                document.getElementById('speedInput').value = 1.0;
+            });
+
+            // Playback Listeners
+            document.getElementById('btnPlay').addEventListener('click', () => isPlaying = true);
+            document.getElementById('btnPause').addEventListener('click', () => isPlaying = false);
+            document.getElementById('btnReset').addEventListener('click', () => {
+                animationTime = 0;
+                updateSliderUI();
+            });
+            
+            // T Parameter Slider and Input Sync
+            const timeSlider = document.getElementById('timeSlider');
+            const timeInput = document.getElementById('timeInput');
+
+            timeSlider.addEventListener('input', (e) => {
+                isPlaying = false;
+                animationTime = parseFloat(e.target.value);
+                timeInput.value = animationTime.toFixed(4);
+            });
+
+            timeInput.addEventListener('change', (e) => {
+                isPlaying = false;
+                let val = parseFloat(e.target.value);
+                if (isNaN(val)) val = 0;
+                if (val < 0) val = 0;
+                if (val > 1) val = 1;
+                animationTime = val;
+                timeSlider.value = val;
+                timeInput.value = val.toFixed(4);
+            });
+
+            // Camera Toggle
+            document.getElementById('followCamToggle').addEventListener('change', (e) => {
+                if(!e.target.checked) {
+                    controls.enabled = true;
+                    controls.target.set(0.5, 0.5, 0); 
+                } else {
+                    currentCamLookAt.copy(tracePoint.position);
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            updateGeometry();
+            animate();
+        }
+
+        function updateSliderUI() {
+            document.getElementById('timeSlider').value = animationTime;
+            document.getElementById('timeInput').value = animationTime.toFixed(4);
+        }
+
+        function updateGeometry() {
+            while(visualGroup.children.length > 0) {
+                let child = visualGroup.children[0];
+                child.geometry.dispose();
+                child.material.dispose();
+                visualGroup.remove(child);
+            }
+
+            const curveVal = document.getElementById('curveSelect').value;
+            const projKey = document.getElementById('projection').value;
+            const dataKey = `${curveVal}_${projKey}`;
+            
+            activeData = precomputedData[dataKey]; 
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(activeData.positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(activeData.colors, 3));
+            
+            const material = new THREE.LineBasicMaterial({ 
+                vertexColors: true,
+                linewidth: 1 
+            });
+            
+            visualGroup.add(new THREE.Line(geometry, material));
+
+            document.getElementById('stats-segments').innerText = `Segments: ${activeData.segmentsCount.toLocaleString()}`;
+            document.getElementById('stats-vertices').innerText = `Vertices: ${activeData.totalVertices.toLocaleString()}`;
+            
+            animationTime = 0;
+            updateSliderUI();
+        }
+
+        // 3. Mathematical Position Evaluator
+        function getVisualPosition(t, data) {
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+
+            const segList = data.mathSegments;
+            let low = 0, high = segList.length - 1;
+            let activeSeg = segList[high];
+            
+            while (low <= high) {
+                let mid = Math.floor((low + high) / 2);
+                if (t >= segList[mid].startTime && (t < segList[mid].endTime || mid === segList.length - 1)) {
+                    activeSeg = segList[mid];
+                    break;
+                } else if (t < segList[mid].startTime) {
+                    high = mid - 1;
+                } else {
+                    low = mid + 1;
+                }
+            }
+
+            let tau = t - activeSeg.startTime;
+            let [x1, x2, x3, x4, x5] = activeSeg.startState;
+            let c = activeSeg.c;
+            let px, py, pz;
+
+            if (activeSeg.V === 'X1') {
+                px = x1 + c * tau; py = x2; pz = data.zIdx === 3 ? x4 : x5;
+            } else {
+                px = x1; py = x2 + c * tau;
+                pz = data.zIdx === 3 
+                     ? (x4 + 0.5 * c * x1 * x1 * tau) 
+                     : (x5 + c * x1 * x2 * tau + 0.5 * c * c * x1 * tau * tau);
+            }
+
+            return new THREE.Vector3(px * data.multX, py * data.multY, pz * data.multZ);
+        }
+
+        // 4. Render Loop with Fast-Smooth Camera
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls.enabled) controls.update();
+
+            const dt = clock.getDelta(); 
+
+            if (activeData) {
+                if (isPlaying) {
+                    const speedMult = parseFloat(document.getElementById('speedInput').value) || 1.0;
+                    const baseCycleDuration = 10.0; 
+                    animationTime += (dt * speedMult) / baseCycleDuration;
+                    
+                    if (animationTime > 1.0) animationTime = 0; 
+                    updateSliderUI();
+                }
+
+                // Calculate current point position
+                let pos = getVisualPosition(animationTime, activeData);
+                tracePoint.position.copy(pos);
+
+                // Handle Smooth Fast First Person Camera
+                if (document.getElementById('followCamToggle').checked) {
+                    controls.enabled = false;
+                    
+                    // Sample purely localized tangent (forward diff within same segment usually)
+                    let lookT = animationTime + 0.00001;
+                    let isReversed = false;
+                    if (lookT > 1.0) {
+                        lookT = animationTime - 0.00001;
+                        isReversed = true;
+                    }
+                    
+                    let pos2 = getVisualPosition(lookT, activeData);
+                    let dir = new THREE.Vector3().subVectors(pos2, pos).normalize();
+                    if (isReversed) dir.negate();
+                    
+                    if (dir.lengthSq() < 0.00001) dir.set(1, 0, 0);
+
+                    // Desired camera position: behind and slightly above
+                    let offsetDist = 0.12;
+                    let offsetHeight = 0.03;
+                    let targetCamPos = pos.clone().addScaledVector(dir, -offsetDist);
+                    targetCamPos.z += offsetHeight;
+
+                    // Desired look target: strictly ahead along exact mathematical tangent
+                    let targetLook = pos.clone().addScaledVector(dir, 0.2); 
+
+                    // Fast interpolation: 0.4 for position, 0.6 for rotation target
+                    camera.position.lerp(targetCamPos, 0.4);
+                    currentCamLookAt.lerp(targetLook, 0.6);
+                    
+                    camera.lookAt(currentCamLookAt);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
