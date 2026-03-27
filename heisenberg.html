@@ -104,13 +104,15 @@
         const settings = {
             contactForm: 'Symmetric', // 'Symmetric' or 'Darboux'
             showPlanes: false,
+            showVectorFieldX: false,
+            showVectorFieldY: false,
             showZZeroOnly: false,
             pointSpacing: 1.0, 
             showCurve: false,
             flyAlongCurve: function() { startFlight(); } 
         };
 
-        // 5. Build the Planes (Optimized with InstancedMesh)
+        // 5. Build the Planes and Vectors (Optimized with InstancedMesh)
         const planeGeometry = new THREE.CircleGeometry(0.25, 32); 
         const planeMaterial = new THREE.MeshNormalMaterial({
             side: THREE.DoubleSide,
@@ -123,11 +125,37 @@
         instancedPlanes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         scene.add(instancedPlanes);
 
+        // Vector Field Geometries
+        const arrowLength = 0.5; // Exactly spans the radius of the plane disks
+        // Tapered cylinder acts as an elegant 3D dart/arrow
+        const arrowGeo = new THREE.CylinderGeometry(0, 0.025, arrowLength, 8);
+        
+        // Shift the cylinder up so its base is at the origin (0,0,0) instead of its center
+        arrowGeo.translate(0, arrowLength / 2, 0); 
+        // Rotate to point along local +Z axis so the lookAt function orients it correctly
+        arrowGeo.rotateX(Math.PI / 2); 
+
+        const materialX = new THREE.MeshPhongMaterial({ color: 0xFEFE62, emissive: 0x220000 }); // Red for X
+        const materialY = new THREE.MeshPhongMaterial({ color: 0xD35FB7, emissive: 0x002200 }); // Green for Y
+
+        const instancedX = new THREE.InstancedMesh(arrowGeo, materialX, totalPlanes);
+        const instancedY = new THREE.InstancedMesh(arrowGeo, materialY, totalPlanes);
+        
+        instancedX.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        instancedY.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        
+        scene.add(instancedX);
+        scene.add(instancedY);
+
         const dummy = new THREE.Object3D();
 
         function updatePlanes() {
             instancedPlanes.visible = settings.showPlanes;
-            if (!settings.showPlanes) return;
+            instancedX.visible = settings.showVectorFieldX;
+            instancedY.visible = settings.showVectorFieldY;
+
+            // Bail early if nothing is visible to save CPU
+            if (!settings.showPlanes && !settings.showVectorFieldX && !settings.showVectorFieldY) return;
 
             const spacing = settings.pointSpacing;
             let index = 0;
@@ -135,42 +163,73 @@
             for (let i = -5; i <= 5; i++) {
                 for (let j = -5; j <= 5; j++) {
                     for (let k = 0; k <= 8; k++) {
-                        const showPlane = settings.showZZeroOnly ? (k === 0) : true;
+                        const showElement = settings.showZZeroOnly ? (k === 0) : true;
                         
-                        if (showPlane) {
-                            const x = i * spacing;
-                            const y = j * spacing;
-                            const z = k * spacing;
+                        const x = i * spacing;
+                        const y = j * spacing;
+                        const z = k * spacing;
 
-                            dummy.position.set(x, y, z);
-
-                            let nx, ny, nz;
-                            if (settings.contactForm === 'Symmetric') {
-                                // Symmetric Form: dz - 0.5(y dx - x dy) = 0
-                                nx = -0.5 * y;
-                                ny = 0.5 * x;
-                                nz = 1;
-                            } else if (settings.contactForm === 'Darboux') {
-                                // Darboux Form: dz - y dx = 0
-                                nx = -y;
-                                ny = 0;
-                                nz = 1;
+                        if (showElement) {
+                            // Update Plane
+                            if (settings.showPlanes) {
+                                dummy.position.set(x, y, z);
+                                let nx, ny, nz;
+                                if (settings.contactForm === 'Symmetric') {
+                                    nx = -0.5 * y; ny = 0.5 * x; nz = 1;
+                                } else if (settings.contactForm === 'Darboux') {
+                                    nx = -y; ny = 0; nz = 1;
+                                }
+                                dummy.lookAt(x + nx, y + ny, z + nz);
+                                dummy.scale.set(1, 1, 1);
+                                dummy.updateMatrix();
+                                instancedPlanes.setMatrixAt(index, dummy.matrix);
                             }
 
-                            const target = new THREE.Vector3(x + nx, y + ny, z + nz);
-                            dummy.lookAt(target);
-                            dummy.scale.set(1, 1, 1); 
+                            // Update Vector Field X
+                            if (settings.showVectorFieldX) {
+                                dummy.position.set(x, y, z);
+                                let vx = 1, vy = 0, vz = 0;
+                                if (settings.contactForm === 'Symmetric') {
+                                    vz = 0.5 * y;
+                                } else {
+                                    vz = y;
+                                }
+                                dummy.lookAt(x + vx, y + vy, z + vz);
+                                dummy.scale.set(1, 1, 1);
+                                dummy.updateMatrix();
+                                instancedX.setMatrixAt(index, dummy.matrix);
+                            }
+
+                            // Update Vector Field Y
+                            if (settings.showVectorFieldY) {
+                                dummy.position.set(x, y, z);
+                                let ux = 0, uy = 1, uz = 0;
+                                if (settings.contactForm === 'Symmetric') {
+                                    uz = -0.5 * x;
+                                } else {
+                                    uz = 0;
+                                }
+                                dummy.lookAt(x + ux, y + uy, z + uz);
+                                dummy.scale.set(1, 1, 1);
+                                dummy.updateMatrix();
+                                instancedY.setMatrixAt(index, dummy.matrix);
+                            }
                         } else {
-                            dummy.scale.set(0, 0, 0); 
+                            // Collapse matrices to 0 to hide individual instances off the z=0 plane
+                            dummy.scale.set(0, 0, 0);
+                            dummy.updateMatrix();
+                            if (settings.showPlanes) instancedPlanes.setMatrixAt(index, dummy.matrix);
+                            if (settings.showVectorFieldX) instancedX.setMatrixAt(index, dummy.matrix);
+                            if (settings.showVectorFieldY) instancedY.setMatrixAt(index, dummy.matrix);
                         }
 
-                        dummy.updateMatrix();
-                        instancedPlanes.setMatrixAt(index, dummy.matrix);
                         index++;
                     }
                 }
             }
-            instancedPlanes.instanceMatrix.needsUpdate = true;
+            if (settings.showPlanes) instancedPlanes.instanceMatrix.needsUpdate = true;
+            if (settings.showVectorFieldX) instancedX.instanceMatrix.needsUpdate = true;
+            if (settings.showVectorFieldY) instancedY.instanceMatrix.needsUpdate = true;
         }
         
         updatePlanes();
@@ -238,6 +297,10 @@
         const planesController = gui.add(settings, 'showPlanes')
            .name('Show Planes')
            .onChange(updatePlanes);
+
+        gui.add(settings, 'showVectorFieldY').name('Show Vector Field X').onChange(updatePlanes);
+	gui.add(settings, 'showVectorFieldX').name('Show Vector Field Y').onChange(updatePlanes);
+        
 
         gui.add(settings, 'showZZeroOnly').name('Show Only z=0 Planes').onChange(updatePlanes);
         gui.add(settings, 'pointSpacing', 0.2, 3.0, 0.1).name('Point Spacing').onChange(updatePlanes);
